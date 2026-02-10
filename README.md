@@ -2,6 +2,8 @@
 
 A collection of Markdown Files that together create simple and organized "Backend Notes for NodeJS and Python" space for my personal use. It uses general syntax approach for production ready practices for all concepts, starting from scratch to finish.
 
+**[Explore System Design](./System_Design.md)**
+
 ## Table of Contents for 
 
 ### NodeJS
@@ -12,5 +14,3 @@ A collection of Markdown Files that together create simple and organized "Backen
 - [5. Real Time Communication with WebSockets](./NodeJS/5_WebSocket.md)
 - [6. Logging](./NodeJS/6_Logging.md)
 - [7. REST API Deep Dive](./NodeJS/7_REST_API_Deep_Dive.md)
-
-### Python
