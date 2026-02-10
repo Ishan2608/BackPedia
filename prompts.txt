@@ -1,0 +1,13 @@
+Refine Web Sockets Part:
+
+1. Omit learning objectives. Shorted Web Socket vs HTTP and its significance to at max 50 words.
+
+2. Indexing regarding headings and sub headings has wrong numbering.
+
+3. Ensure that like real world apps, the documentations clearly explains: the setup of users choosing which user to talk to, creating groups and choosing which group to talk to instead of assuming a universal group, or that a particular group already exists. That part can be added as comment. E.g., on UI user click on a group card, that triggerd the join_group function and that groups unique ID stored in DB schema was sent... something like this in comments. Well written comments.
+
+4. Refine ASCII arts a little more.
+
+5. Use comments more in handler snippets to revise/recall where a particular object or value that we are using came from to help user keep track.
+
+6. Combine Handler Code Implementation with its general pattern part. You can write basic function call syntax or keywords using comments.

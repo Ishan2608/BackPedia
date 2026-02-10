@@ -1,4 +1,4 @@
-# Project Setup - Building a Production-Ready Node.js Backend
+# 1. Project Setup - Building a Production-Ready Node.js Backend
 
 ## Overview
 
@@ -388,10 +388,10 @@ const HOST = config.host;
 // Start server
 const server = app.listen(PORT, HOST, () => {
   console.log(`
-    ╔════════════════════════════════════════╗
+    ╔══════════════════════════════════════════════╗
     ║  Server running in ${config.nodeEnv} mode    ║
-    ║  URL: http://${HOST}:${PORT}            ║
-    ╚════════════════════════════════════════╝
+    ║  URL: http://${HOST}:${PORT}                 ║
+    ╚══════════════════════════════════════════════╝
   `);
 });
 
@@ -656,7 +656,7 @@ router.delete("/:id", async (req, res) => {
 ### Route Naming Best Practices
 
 ```js
-// ✅ Good - RESTful, clear, consistent
+//  Good - RESTful, clear, consistent
 GET    /api/users
 GET    /api/users/:id
 POST   /api/users
@@ -841,7 +841,7 @@ server.session.userId = 123;
 // Request 2: GET /api/profile
 const userId = server.session.userId;  // Relies on previous request
 
-// ✅ Good - Stateless
+//  Good - Stateless
 // Request 1: POST /api/login
 res.json({ token: "jwt-token-here" });
 
@@ -860,7 +860,7 @@ POST /api/createUser
 GET  /api/getUser/123
 POST /api/deleteUser/123
 
-// ✅ Good - Resource-based
+//  Good - Resource-based
 POST   /api/users          // Create
 GET    /api/users/123      // Read
 DELETE /api/users/123      // Delete
@@ -913,11 +913,7 @@ Consistent JSON structure across all endpoints.
 }
 ```
 
-#### 5. **Use HTTP Status Codes**
-
-Let status codes convey meaning (covered in previous section).
-
-#### 6. **Versioning**
+#### 5. **Versioning**
 
 Plan for API changes with versioning.
 
@@ -1112,243 +1108,26 @@ npm run dev:debug
 
 ---
 
-## 10. Complete Working Example
-
-Let's put everything together with a minimal but complete API.
-
-### Project Structure
-
-```text
-user-api/
-├── src/
-│   ├── server.js
-│   ├── app.js
-│   ├── config/
-│   │   └── env.js
-│   ├── controllers/
-│   │   └── user.controller.js
-│   ├── routes/
-│   │   └── user.routes.js
-│   └── middlewares/
-│       └── error.middleware.js
-├── .env
-├── .env.example
-├── .gitignore
-└── package.json
-```
-
-### Implementation Files
-
-**`package.json`**:
-```json
-{
-  "name": "user-api",
-  "version": "1.0.0",
-  "main": "src/server.js",
-  "scripts": {
-    "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "dotenv": "^16.3.1",
-    "cors": "^2.8.5"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
-  }
-}
-```
-
-**`.env`**:
-```bash
-NODE_ENV=development
-PORT=3000
-CORS_ORIGIN=http://localhost:5173
-```
-
-**`src/config/env.js`**:
-```js
-require("dotenv").config();
-
-module.exports = {
-  nodeEnv: process.env.NODE_ENV || "development",
-  port: process.env.PORT || 3000,
-  cors: {
-    origin: process.env.CORS_ORIGIN || "*"
-  }
-};
-```
-
-**`src/server.js`**:
-```js
-const app = require("./app");
-const config = require("./config/env");
-
-const server = app.listen(config.port, () => {
-  console.log(`Server running on port ${config.port}`);
-});
-
-process.on("SIGTERM", () => {
-  server.close(() => console.log("Server closed"));
-});
-```
-
-**`src/app.js`**:
-```js
-const express = require("express");
-const cors = require("cors");
-const config = require("./config/env");
-const userRoutes = require("./routes/user.routes");
-const errorHandler = require("./middlewares/error.middleware");
-
-const app = express();
-
-// Middleware
-app.use(cors({ origin: config.cors.origin }));
-app.use(express.json());
-
-// Routes
-app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
-});
-
-app.use("/api/users", userRoutes);
-
-// Error handling
-app.use("*", (req, res) => {
-  res.status(404).json({ error: "Route not found" });
-});
-
-app.use(errorHandler);
-
-module.exports = app;
-```
-
-**`src/routes/user.routes.js`**:
-```js
-const express = require("express");
-const userController = require("../controllers/user.controller");
-
-const router = express.Router();
-
-router.get("/", userController.getAllUsers);
-router.get("/:id", userController.getUserById);
-router.post("/", userController.createUser);
-router.put("/:id", userController.updateUser);
-router.delete("/:id", userController.deleteUser);
-
-module.exports = router;
-```
-
-**`src/controllers/user.controller.js`**:
-```js
-// Mock data (replace with database later)
-let users = [
-  { id: "1", name: "Alice", email: "alice@example.com" },
-  { id: "2", name: "Bob", email: "bob@example.com" }
-];
-
-exports.getAllUsers = (req, res) => {
-  res.json({ success: true, data: users });
-};
-
-exports.getUserById = (req, res) => {
-  const user = users.find(u => u.id === req.params.id);
-  if (!user) {
-    return res.status(404).json({ success: false, error: "User not found" });
-  }
-  res.json({ success: true, data: user });
-};
-
-exports.createUser = (req, res) => {
-  const newUser = {
-    id: String(users.length + 1),
-    ...req.body
-  };
-  users.push(newUser);
-  res.status(201).json({ success: true, data: newUser });
-};
-
-exports.updateUser = (req, res) => {
-  const index = users.findIndex(u => u.id === req.params.id);
-  if (index === -1) {
-    return res.status(404).json({ success: false, error: "User not found" });
-  }
-  users[index] = { ...users[index], ...req.body };
-  res.json({ success: true, data: users[index] });
-};
-
-exports.deleteUser = (req, res) => {
-  const index = users.findIndex(u => u.id === req.params.id);
-  if (index === -1) {
-    return res.status(404).json({ success: false, error: "User not found" });
-  }
-  users.splice(index, 1);
-  res.status(204).send();
-};
-```
-
-**`src/middlewares/error.middleware.js`**:
-```js
-module.exports = (err, req, res, next) => {
-  console.error(err.stack);
-  
-  res.status(err.statusCode || 500).json({
-    success: false,
-    error: err.message || "Internal server error"
-  });
-};
-```
-
-### Running the Project
-
-```bash
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-
-# Test endpoints
-curl http://localhost:3000/health
-curl http://localhost:3000/api/users
-curl -X POST http://localhost:3000/api/users \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Charlie","email":"charlie@example.com"}'
-```
-
----
-
 ## Summary
 
 You now have a production-ready Node.js project setup with:
 
 **Foundation**:
-- ✅ Proper project initialization and dependencies
-- ✅ MVC folder structure for scalability
-- ✅ Environment configuration for different deployments
+- Proper project initialization and dependencies
+- MVC folder structure for scalability
+- Environment configuration for different deployments
 
 **Server Setup**:
-- ✅ Separated server.js and app.js
-- ✅ Middleware configured in correct order
-- ✅ Graceful shutdown handling
+- Separated server.js and app.js
+- Middleware configured in correct order
+- Graceful shutdown handling
 
 **Routing**:
-- ✅ RESTful conventions
-- ✅ Route organization pattern
-- ✅ Static and dynamic routes
+- RESTful conventions
+- Route organization pattern
+- Static and dynamic routes
 
 **HTTP Fundamentals**:
-- ✅ Proper status codes
-- ✅ REST principles
-- ✅ Consistent response formats
-
-**Next Steps**:
-1. Add database integration (MongoDB/PostgreSQL)
-2. Implement authentication (JWT)
-3. Add validation middleware
-4. Set up logging
-5. Write tests
-
-This structure will scale from small projects to large applications without major refactoring.
+- Proper status codes
+- REST principles
+- Consistent response formats

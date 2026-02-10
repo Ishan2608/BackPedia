@@ -1,4 +1,4 @@
-# Authentication and Authorization in NodeJS
+# 3. Authentication and Authorization in NodeJS
 
 ## Core Concepts
 

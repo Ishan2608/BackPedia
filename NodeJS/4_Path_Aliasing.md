@@ -1,4 +1,4 @@
-# Module/Path Aliasing in NodeJS
+# 4. Module/Path Aliasing in NodeJS
 
 ## What is Path Aliasing?
 
@@ -304,7 +304,7 @@ const config = require("#config/jwt");
 **Important**: Must use `.js` extension in mapped paths, but **not** when importing:
 
 ```js
-// ✅ Correct
+//  Correct
 const config = require("#config/jwt");
 
 // ❌ Wrong - don't add .js when importing
@@ -595,12 +595,12 @@ If using TypeScript or JSDoc for type checking, configure path mapping:
 | **Setup complexity** | Easy | Easy | Moderate |
 | **Node version** | Any | 12.20+ | Any |
 | **Dependencies** | 1 package | None | 3+ packages |
-| **ES6 imports** | ❌ No | ✅ Yes | ✅ Yes |
-| **Build step** | ❌ No | ❌ No | ✅ Yes |
+| **ES6 imports** | ❌ No |  Yes |  Yes |
+| **Build step** | ❌ No | ❌ No |  Yes |
 | **Runtime overhead** | Small | None | None |
 | **IDE support** | Moderate | Good | Excellent |
 | **Prefix options** | Any | Only `#` | Any |
-| **Production ready** | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Production ready** |  Yes |  Yes |  Yes |
 
 ---
 
@@ -631,7 +631,7 @@ If using TypeScript or JSDoc for type checking, configure path mapping:
 ### 1. Consistent Naming Convention
 
 ```js
-// ✅ Good - Clear, consistent prefixes
+//  Good - Clear, consistent prefixes
 @config/database
 @models/User.model
 @utils/logger
@@ -645,7 +645,7 @@ utils/logger
 ### 2. Don't Over-Alias
 
 ```js
-// ✅ Good - Alias common directories
+//  Good - Alias common directories
 const User = require("@models/User.model");
 
 // ❌ Bad - Aliasing everything including npm packages
@@ -671,7 +671,7 @@ require("module-alias/register");
 ### 4. Keep Aliases Shallow
 
 ```js
-// ✅ Good - Top-level directories
+//  Good - Top-level directories
 @config
 @models
 @utils
@@ -927,5 +927,3 @@ Path aliasing transforms messy relative imports into clean, maintainable code:
 3. **Configure tooling**: Add IDE, ESLint, and TypeScript configs for best experience
 4. **Follow conventions**: Use `@` prefix, alias directories not files, keep it simple
 5. **Document aliases**: Help future developers (including yourself) understand the system
-
-With proper setup, path aliasing significantly improves code organization and developer experience in Node.js applications.
