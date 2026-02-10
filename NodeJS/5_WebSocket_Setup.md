@@ -1,4 +1,4 @@
-# Real-Time Communication with Socket.io
+# 5. Real-Time Communication with Socket.io
 
 ## Why WebSockets?
 
@@ -47,7 +47,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Alice sends message to Bob                        │
+│                    Alice sends message to Bob                       │
 └─────────────────────────────────────────────────────────────────────┘
 
 ALICE (socket_abc)              SERVER                  BOB (socket_xyz)
