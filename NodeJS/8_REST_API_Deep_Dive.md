@@ -1,4 +1,4 @@
-# 7. Deep Dive into REST API
+# 8. Deep Dive into REST API
 
 ## What is REST?
 

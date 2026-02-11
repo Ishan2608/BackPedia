@@ -1,4 +1,4 @@
-# 6. Logging in Node.js
+# 7. Logging in Node.js
 
 ## Why Logging?
 
