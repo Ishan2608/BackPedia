@@ -19,6 +19,7 @@ A collection of Markdown Files that together create simple and organized "Backen
   - [Summary of Security Practices](./Security_Summary.md)
 - [10. BaaS Introduction](./1-_BaaS_Introduction.md)
 - [11. Firebase](./NodeJS/11_Firebase.md)
-- [12. BaaS](./NodeJS/12_Supabase.md)
+- [12. Supabase](./NodeJS/12_Supabase.md)
+
 
 
