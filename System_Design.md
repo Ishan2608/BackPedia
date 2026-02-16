@@ -18,9 +18,9 @@ The running example throughout this guide is a social media platform called **Th
 
 Before defining architecture, you need a clear picture of what a "system" means in software.
 
-In plain terms: a system is a collection of components that work together to do something useful. Your smartphone is a system. A city's water supply is a system. A software application is a system.
+**In plain terms:** a system is a collection of components that work together to do something useful. Your smartphone is a system. A city's water supply is a system. A software application is a system.
 
-In technical terms: a software system is a set of processes, data stores, and network connections that together accept inputs, process them, and produce outputs — reliably, correctly, and within acceptable time constraints.
+**In technical terms:** a software system is a set of processes, data stores, and network connections that together accept inputs, process them, and produce outputs — reliably, correctly, and within acceptable time constraints.
 
 When you write a Node.js script that reads a CSV file and prints totals, that is a program. When that same logic needs to serve thousands of users simultaneously, store data persistently, recover from hardware failures, deploy updates without downtime, and remain fast as data grows — that is a system. The difference is not in the core logic. It is in all the infrastructure and structural decisions surrounding that logic.
 
@@ -30,7 +30,7 @@ System architecture is the practice of making those structural decisions deliber
 
 Every architectural decision is a response to one or more forces acting on a system. Understanding these forces is the foundation of architectural thinking.
 
-**Scale** is the force of growth. A design that works for 100 users may fall apart at 100,000. Scale forces you to think about how your system behaves as load increases. There are two kinds of scale: load (more users, more requests, more data) and geographic scale (users distributed across the world who need fast responses regardless of their location).
+**Scale** is the force of growth. A design that works for 100 users may fall apart at 100,000. Scale forces you to think about how your system behaves as load increases. There are **two kinds of scale:** load (more users, more requests, more data) and geographic scale (users distributed across the world who need fast responses regardless of their location).
 
 **Reliability** is the force of expectation. Users and businesses expect systems to work. Every minute of downtime has a cost — financial, reputational, or both. Reliability forces you to think about what happens when things go wrong: when a server crashes, when a database goes offline, when a network connection drops. The question is not if these things happen but when.
 
@@ -50,9 +50,9 @@ Good architecture is not about applying every pattern you know. It is about unde
 
 Every networked application — every web app, every mobile app, every API — is built on a pattern called the **client-server model**. If you have ever loaded a webpage or used a mobile app that connects to the internet, you have participated in this model without necessarily knowing its name.
 
-In plain terms: a client is anything that asks for something. A server is anything that provides something. When you open Instagram on your phone, your phone is the client. Instagram's computers somewhere in a data center are the server. Your phone asks for your feed; the server sends it back.
+**In plain terms:** a client is anything that asks for something. A server is anything that provides something. When you open Instagram on your phone, your phone is the client. Instagram's computers somewhere in a data center are the server. Your phone asks for your feed; the server sends it back.
 
-In technical terms: a **client** is a process that initiates a request over a network. A **server** is a process that listens for incoming requests, processes them, and sends back a response. The communication between them follows a defined protocol — a set of rules about the format and sequence of messages. On the web, that protocol is HTTP (Hypertext Transfer Protocol) or HTTPS (the encrypted version).
+**In technical terms:** a **client** is a process that initiates a request over a network. A **server** is a process that listens for incoming requests, processes them, and sends back a response. The communication between them follows a defined protocol — a set of rules about the format and sequence of messages. On the web, that protocol is HTTP (Hypertext Transfer Protocol) or HTTPS (the encrypted version).
 
 ```
 [ Client ]  ──── HTTP Request ────►  [ Server ]
@@ -97,17 +97,17 @@ Every HTTP interaction is a request followed by a response. Understanding the an
 
 An HTTP **request** has four parts: the method, the URL, the headers, and optionally a body.
 
-The **method** expresses the intent of the request. The conventions are: `GET` retrieves data without modifying anything; `POST` creates something new; `PUT` replaces something entirely; `PATCH` modifies part of something; `DELETE` removes something. These are conventions — a server can technically respond to a `GET` request by modifying data — but following them makes your API predictable and compatible with tools, proxies, and caches that rely on these semantics.
+- The **method** expresses the intent of the request. The conventions are: `GET` retrieves data without modifying anything; `POST` creates something new; `PUT` replaces something entirely; `PATCH` modifies part of something; `DELETE` removes something. These are conventions — a server can technically respond to a `GET` request by modifying data — but following them makes your API predictable and compatible with tools, proxies, and caches that rely on these semantics.
 
-The **URL** (Uniform Resource Locator) identifies what resource the request targets. In a well-designed API, URLs are structured as hierarchical paths: `/users/123` refers to user 123; `/users/123/posts` refers to user 123's posts; `/users/123/posts/456` refers to post 456 by user 123. This structure is called **REST** (Representational State Transfer), and it is the most common convention for designing web APIs.
+- The **URL** (Uniform Resource Locator) identifies what resource the request targets. In a well-designed API, URLs are structured as hierarchical paths: `/users/123` refers to user 123; `/users/123/posts` refers to user 123's posts; `/users/123/posts/456` refers to post 456 by user 123. This structure is called **REST** (Representational State Transfer), and it is the most common convention for designing web APIs.
 
-The **headers** carry metadata: the content type of the body (`Content-Type: application/json`), authentication credentials (`Authorization: Bearer <token>`), caching instructions, and more.
+- The **headers** carry metadata: the content type of the body (`Content-Type: application/json`), authentication credentials (`Authorization: Bearer <token>`), caching instructions, and more.
 
-The **body** carries the data payload for requests that create or modify resources. A `POST` request to create a new post would include the post content in the body, formatted as JSON.
+- The **body** carries the data payload for requests that create or modify resources. A `POST` request to create a new post would include the post content in the body, formatted as JSON.
 
 An HTTP **response** has three parts: the status code, the headers, and the body.
 
-The **status code** is a three-digit number that summarizes the outcome. Codes in the 200 range mean success (200 OK, 201 Created, 204 No Content). Codes in the 400 range mean the client made an error (400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 422 Unprocessable Entity). Codes in the 500 range mean the server encountered an error (500 Internal Server Error, 503 Service Unavailable). Using the correct status code is not pedantic — clients, proxies, monitoring systems, and API consumers all use these codes to make decisions.
+- The **status code** is a three-digit number that summarizes the outcome. Codes in the 200 range mean success (200 OK, 201 Created, 204 No Content). Codes in the 400 range mean the client made an error (400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 422 Unprocessable Entity). Codes in the 500 range mean the server encountered an error (500 Internal Server Error, 503 Service Unavailable). Using the correct status code is not pedantic — clients, proxies, monitoring systems, and API consumers all use these codes to make decisions.
 
 ### Statelessness: Why Servers Don't Remember You
 
@@ -127,9 +127,9 @@ This design is intentional and valuable. Because servers do not hold session sta
 
 When developers say "the server," they usually mean the **application server** — the process that contains your business logic. It is the code you write in Node.js, Python, Go, Java, or any other language. It listens on a network port, receives HTTP requests, executes logic, and returns HTTP responses.
 
-In plain terms: the application server is the brain of your backend. It is where decisions are made. Given a request for a user's feed, it decides how to fetch the right posts. Given a request to create a post, it validates the content, saves it to the database, and triggers notifications to followers.
+**In plain terms:** the application server is the brain of your backend. It is where decisions are made. Given a request for a user's feed, it decides how to fetch the right posts. Given a request to create a post, it validates the content, saves it to the database, and triggers notifications to followers.
 
-In technical terms: an application server is a long-running process that binds to a TCP port, accepts incoming connections, parses HTTP requests, dispatches them to the appropriate handler function (called a **route handler** or **controller**), and returns HTTP responses. In Node.js, this is typically done with a framework like Express or Fastify. In Python, it is Flask or FastAPI or Django. The framework handles the low-level HTTP mechanics; you write the route handlers.
+**In technical terms:** an application server is a long-running process that binds to a TCP port, accepts incoming connections, parses HTTP requests, dispatches them to the appropriate handler function (called a **route handler** or **controller**), and returns HTTP responses. In Node.js, this is typically done with a framework like Express or Fastify. In Python, it is Flask or FastAPI or Django. The framework handles the low-level HTTP mechanics; you write the route handlers.
 
 Here is what a simple route handler looks like in Node.js with Express, to illustrate the pattern:
 
@@ -210,9 +210,9 @@ Structuring your server logic as a middleware pipeline keeps concerns separated.
 
 A critical architectural concept for Node.js developers is understanding how a Node.js server handles multiple simultaneous requests.
 
-In plain terms: imagine a single waiter at a restaurant with ten tables. Instead of standing at one table waiting for the kitchen to prepare food, the waiter takes an order, submits it to the kitchen, and immediately walks to the next table to take their order. When the kitchen signals that food is ready, the waiter delivers it. The waiter handles many tables not by working on all of them at once, but by never waiting idly.
+**In plain terms:** imagine a single waiter at a restaurant with ten tables. Instead of standing at one table waiting for the kitchen to prepare food, the waiter takes an order, submits it to the kitchen, and immediately walks to the next table to take their order. When the kitchen signals that food is ready, the waiter delivers it. The waiter handles many tables not by working on all of them at once, but by never waiting idly.
 
-In technical terms: Node.js is single-threaded. It runs one operation at a time on a single CPU core. However, most operations that take time in a web server — reading from a database, fetching from an external API, reading a file — are **I/O operations** (Input/Output). These operations are handled by the operating system, which means Node.js can hand them off, move on to other work, and be notified when they complete. This is called **non-blocking I/O** and it is managed by the **event loop**.
+**In technical terms:** Node.js is single-threaded. It runs one operation at a time on a single CPU core. However, most operations that take time in a web server — reading from a database, fetching from an external API, reading a file — are **I/O operations** (Input/Output). These operations are handled by the operating system, which means Node.js can hand them off, move on to other work, and be notified when they complete. This is called **non-blocking I/O** and it is managed by the **event loop**.
 
 ```javascript
 // This is synchronous — it blocks the thread
@@ -240,9 +240,9 @@ The implication for architecture is significant: Node.js can handle thousands of
 
 Servers are stateless, and their memory is temporary — when a server process restarts, everything in memory is gone. Applications need to store data permanently. They need to retrieve it quickly, store it reliably, and query it flexibly. This is what a database does.
 
-In plain terms: a database is a specialized program whose entire purpose is storing and retrieving data. It is optimized for this job in ways that a plain file on disk is not. It handles concurrent access from multiple processes safely, enforces data integrity rules, recovers from crashes without losing data, and lets you search and filter data efficiently.
+**In plain terms:** a database is a specialized program whose entire purpose is storing and retrieving data. It is optimized for this job in ways that a plain file on disk is not. It handles concurrent access from multiple processes safely, enforces data integrity rules, recovers from crashes without losing data, and lets you search and filter data efficiently.
 
-In technical terms: a database is a server process (distinct from your application server) that manages a persistent data store. Your application server communicates with it over a network connection (or a local socket), sending queries in the database's query language (SQL for relational databases) and receiving result sets in response.
+**In technical terms:** a database is a server process (distinct from your application server) that manages a persistent data store. Your application server communicates with it over a network connection (or a local socket), sending queries in the database's query language (SQL for relational databases) and receiving result sets in response.
 
 ### Relational Databases: SQL
 
@@ -329,7 +329,7 @@ CREATE INDEX idx_follows_follower_created ON follows(follower_id, created_at DES
 
 Indexes have a cost: they consume disk space and slow down writes slightly (because the index must be updated whenever data is inserted or changed). The skill is in creating indexes where they meaningfully speed up reads, not indexing everything indiscriminately.
 
-The rule of thumb: index every column used in a `WHERE` clause, every foreign key column, and every column used in `ORDER BY` for queries that touch large tables.
+> **The rule of thumb:** index every column used in a `WHERE` clause, every foreign key column, and every column used in `ORDER BY` for queries that touch large tables.
 
 ### Non-Relational Databases: NoSQL
 
@@ -376,9 +376,9 @@ The performance difference is significant. Twenty separate database queries mean
 
 Every application that separates a frontend from a backend needs an **API** (Application Programming Interface) — a defined contract that specifies how the frontend can communicate with the backend. The API defines what requests are available, what data they expect, and what responses they return.
 
-In plain terms: an API is a menu at a restaurant. The menu tells you exactly what you can order (the available endpoints), what information you need to provide (the request format), and what you will receive (the response format). The kitchen (the backend logic) handles the preparation; you never go into the kitchen directly.
+**In plain terms:** an API is a menu at a restaurant. The menu tells you exactly what you can order (the available endpoints), what information you need to provide (the request format), and what you will receive (the response format). The kitchen (the backend logic) handles the preparation; you never go into the kitchen directly.
 
-In technical terms: a web API is a set of HTTP endpoints that expose backend functionality. Each endpoint is a combination of an HTTP method and a URL path. The API contract defines the request and response schemas for each endpoint, the required authentication, and the possible error codes.
+**In technical terms:** a web API is a set of HTTP endpoints that expose backend functionality. Each endpoint is a combination of an HTTP method and a URL path. The API contract defines the request and response schemas for each endpoint, the required authentication, and the possible error codes.
 
 ### REST API Design Principles
 
@@ -575,9 +575,9 @@ The database receives the SQL template and the parameter values as separate obje
 
 Authentication and authorization are two related but distinct concepts that are frequently confused. The distinction matters architecturally because they are solved differently.
 
-**Authentication** is the process of verifying identity. It answers the question: who are you? When you log in with an email and password, or sign in with Google, you are authenticating. The system confirms that you are who you claim to be.
+- **Authentication** is the process of verifying identity. It answers the question: who are you? When you log in with an email and password, or sign in with Google, you are authenticating. The system confirms that you are who you claim to be.
 
-**Authorization** is the process of verifying permissions. It answers the question: what are you allowed to do? Once the system knows who you are, it checks whether you have permission to perform the requested action. A user might be authenticated (the system knows it is Alex) but not authorized to delete another user's post (Alex does not own that post).
+- **Authorization** is the process of verifying permissions. It answers the question: what are you allowed to do? Once the system knows who you are, it checks whether you have permission to perform the requested action. A user might be authenticated (the system knows it is Alex) but not authorized to delete another user's post (Alex does not own that post).
 
 Most systems need both. A system with only authentication knows who everyone is but allows them to do anything. A system with only authorization can enforce permissions but cannot verify identity.
 
@@ -782,9 +782,9 @@ const posts = await replicaDb.query('SELECT * FROM posts WHERE author_id = $1', 
 
 The most powerful performance optimization available to most applications is caching: storing the result of an expensive operation so you do not have to perform it again for some period of time.
 
-In plain terms: the first time someone asks for Threadly's trending posts, your server runs a complex database query, computes the results, and returns them. If you save those results in a fast in-memory store, the next thousand people who ask for trending posts get the answer immediately without hitting the database at all.
+**In plain terms:** the first time someone asks for Threadly's trending posts, your server runs a complex database query, computes the results, and returns them. If you save those results in a fast in-memory store, the next thousand people who ask for trending posts get the answer immediately without hitting the database at all.
 
-In technical terms: **caching** is the practice of storing computed results in a fast storage layer (typically Redis, an in-memory key-value store) and returning the cached result for subsequent identical requests until the cache expires or is invalidated.
+**In technical terms:** **caching** is the practice of storing computed results in a fast storage layer (typically Redis, an in-memory key-value store) and returning the cached result for subsequent identical requests until the cache expires or is invalidated.
 
 **Redis** is the standard cache in web architectures. It stores data entirely in memory, which makes reads and writes extremely fast — microseconds instead of milliseconds. You store any value as a string under a key, set an expiry time (TTL — Time To Live), and retrieve it by key.
 
@@ -820,7 +820,7 @@ async function getTrendingPosts() {
 }
 ```
 
-Cache invalidation — deciding when to clear or update the cache — is one of the genuinely difficult problems in systems design. A few strategies exist. **TTL-based expiry** (the cache automatically expires after N seconds) is simple but means users may see stale data for up to N seconds. **Write-through invalidation** (clear the cache whenever the underlying data changes) is more accurate but requires your write code to know about every cache key that depends on the changed data. In practice, most systems use a combination: TTL for data where slight staleness is acceptable, and explicit invalidation for data that must be immediately consistent.
+**Cache invalidation** — deciding when to clear or update the cache — is one of the genuinely difficult problems in systems design. A few strategies exist. **TTL-based expiry** (the cache automatically expires after N seconds) is simple but means users may see stale data for up to N seconds. **Write-through invalidation** (clear the cache whenever the underlying data changes) is more accurate but requires your write code to know about every cache key that depends on the changed data. In practice, most systems use a combination: TTL for data where slight staleness is acceptable, and explicit invalidation for data that must be immediately consistent.
 
 ### The CDN: Caching at the Edge
 
@@ -1042,7 +1042,10 @@ app.get('/health', async (req, res) => {
 
 Your load balancer polls each server's health check endpoint and automatically stops routing traffic to any server that reports unhealthy. This is how rolling deployments and automated recovery work.
 
-Beyond health checks, you need **observability**: the ability to understand what your system is doing from the outside. The three pillars of observability are logs (records of events), metrics (numerical measurements over time), and traces (records of how a request traveled through your system).
+Beyond health checks, you need **observability**: the ability to understand what your system is doing from the outside. The three pillars of observability are:
+- logs (records of events),
+- metrics (numerical measurements over time), and
+- traces (records of how a request traveled through your system).
 
 ### Circuit Breakers
 
@@ -1133,7 +1136,8 @@ fetch('/posts', {
   },
   body: JSON.stringify({ content: 'Hello, Threadly!' })
 });
-
+```
+```
 // Server checks if this key was already processed
 app.post('/posts', authMiddleware, async (req, res) => {
   const idempotencyKey = req.headers['idempotency-key'];
