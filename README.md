@@ -17,9 +17,10 @@ A collection of Markdown Files that together create simple and organized "Backen
 - [8. REST API Deep Dive](./NodeJS/8_REST_API_Deep_Dive.md)
 - [9. Deep Dive into Security](./NodeJS/9_Security_Deep_Dive.md)
   - [Summary of Security Practices](./Security_Summary.md)
-- [10. BaaS Introduction](./1-_BaaS_Introduction.md)
+- [10. BaaS Introduction](./10_BaaS_Introduction.md)
 - [11. Firebase](./NodeJS/11_Firebase.md)
 - [12. Supabase](./NodeJS/12_Supabase.md)
+
 
 
 
