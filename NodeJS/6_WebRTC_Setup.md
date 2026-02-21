@@ -197,7 +197,7 @@ Caller                              Callee
   |                                   |
   |-- setRemoteDescription(answer) -- |   (Caller finalizes settings)
   |                                   |
-  |         ✅ SDP Negotiation Done    |
+  |         ✅ SDP Negotiation Done  |
 ```
 
 ```js
@@ -383,27 +383,27 @@ function sendMessage(text) {
 │                      │                      │  createAnswer()               │
 │                      │                      │  setLocalDesc(answer)         │
 │                      │                      │        │                      │
-│◄──────────────────── emit 'answer' SDP ─────┘        │                     │
+│◄──────────────────── emit 'answer' SDP ─────┘        │                      │
 │  setRemoteDesc(ans)  │                      │                               │
 │                      │                      │                               │
-│  ┌──── ICE Gathering Starts (both sides) ───────────────────────┐          │
-│  │                   │                      │                   │          │
-│  │  onicecandidate ──┤──emit 'candidate'───►├── addIceCandidate │          │
-│  │  addIceCandidate ◄├──emit 'candidate'────┤── onicecandidate  │          │
-│  │                   │  (multiple rounds)   │                   │          │
+│  ┌──── ICE Gathering Starts (both sides) ───────────────────────┐           │
+│  │                   │                      │                   │           │
+│  │  onicecandidate ──┤──emit 'candidate'───►├── addIceCandidate │           │
+│  │  addIceCandidate ◄├──emit 'candidate'────┤── onicecandidate  │           │
+│  │                   │  (multiple rounds)   │                   │           │
 │  └───────────────────────────────────────────────────────────────┘          │
 │                      │                      │                               │
 │  ╔═══════════════════════════════════════════════════════╗                  │
-│  ║  ICE Connectivity Checks (automatic, no code needed) ║                  │
-│  ║  Peers ping each other's candidates → best path wins ║                  │
+│  ║  ICE Connectivity Checks (automatic, no code needed) ║                   │
+│  ║  Peers ping each other's candidates → best path wins ║                   │
 │  ╚═══════════════════════════════════════════════════════╝                  │
 │                      │                      │                               │
-│  connectionState: 'connected' ◄────────────► connectionState: 'connected'  │
+│  connectionState: 'connected' ◄────────────► connectionState: 'connected'   │
 │                      │                      │                               │
-│  ◄═══════════════════ Media flows P2P ══════════════════►                  │
+│  ◄═══════════════════ Media flows P2P ══════════════════►                   │
 │       (video/audio via MediaStream tracks, chat via DataChannel)            │
 │                      │                      │                               │
-│            Server is no longer involved ✅  │                               │
+│            Server is no longer involved ✅  │                              │
 └──────────────────────┴──────────────────────┴───────────────────────────────┘
 ```
 
