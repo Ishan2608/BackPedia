@@ -1,1632 +1,1672 @@
-# 5. Real-Time Communication with Socket.io
-
-## Why WebSockets?
-
-**HTTP**: Client asks, server responds, connection closes. Requires repeated polling for updates.
-
-**WebSocket**: Persistent two-way connection. Server pushes updates instantly without client asking. Essential for real-time features like chat.
+# WebSocket: Real-Time Chat
+### A Beginner-Friendly Technical Reference — 1-on-1, Group Chats & File Sharing
 
 ---
 
-## 1. Understanding Socket.io (Theory)
+## What Is WebSocket?
 
-### 1.1 Socket Connection Flow
+**Simple idea:** Think of regular HTTP like sending letters by post — you write a request, mail it, wait for a reply. WebSocket is like a phone call — once connected, both sides can talk whenever they want, without dialing again.
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Initial Connection                           │
-└─────────────────────────────────────────────────────────────────────┘
+**Technical reality:** WebSocket is a communication protocol that establishes a **persistent, full-duplex TCP connection** between a client (browser) and a server. Once the connection is open, either side can push messages to the other at any time — no repeated HTTP requests needed.
 
-   CLIENT (Browser)                      SERVER (Node.js)
-┌──────────────────┐                 ┌────────────────────┐
-│ User opens app   │                 │                    │
-│       │          │                 │  Waiting for       │
-│       ▼          │                 │  connections       │
-│ socket = io(url, │                 │       │            │
-│   { auth: token })─────────────────┼──────►│            │
-│                  │  Sends JWT      │       │            │
-│                  │                 │       ▼            │
-│                  │                 │  io.use() runs     │
-│                  │                 │  Verify token      │
-│                  │                 │  Get user from DB  │
-│                  │                 │  socket.userId =   │
-│                  │                 │    "user123"       │
-│                  │                 │       │            │
-│                  │◄────────────────┼───────┘            │
-│  Connection OK   │  socketId       │                    │
-│  socket.id =     │  assigned       │  Store mapping:    │
-│  "abc456"        │                 │  userId → socketId │
-│       │          │                 │       │            │
-│       ▼          │                 │       ▼           │
-│  Ready to send/  │                 │  Ready to handle   │
-│  receive         │                 │  events            │
-└──────────────────┘                 └────────────────────┘
-```
+**Why not just use HTTP?** HTTP is request-response: the client asks, the server answers, then the connection closes. For chat, this means constantly polling ("any new messages?") which is slow and wasteful. WebSocket keeps the channel open permanently.
 
-### 1.2 Direct Message Flow
+> **Key distinctions:**
+> - 🔁 **HTTP** → client asks, server answers, connection closes. One-way at a time.
+> - 📡 **WebSocket** → one connection, both sides push freely, connection stays open.
+> - 🏛️ **All messages route through the server** → unlike WebRTC, there is no P2P. The server is always in the middle, which makes group logic easy to manage.
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Alice sends message to Bob                       │
-└─────────────────────────────────────────────────────────────────────┘
+---
 
-ALICE (socket_abc)              SERVER                  BOB (socket_xyz)
-      │                            │                            │
-      │ Click "Bob" in list        │                            │
-      │ Type "Hi Bob"              │                            │
-      │ Click Send                 │                            │
-      │                            │                            │
-      │ emit("send_direct_message",│                            │
-      │   {recipientId, content})  │                            │
-      ├───────────────────────────►│                            │
-      │                            │                            │
-      │                            │ 1. Get sender from         │
-      │                            │    socket.userId           │
-      │                            │ 2. Save to MongoDB         │
-      │                            │ 3. Find Bob's socket       │
-      │                            │    activeUsers.get(bobId)  │
-      │                            │    = socket_xyz            │
-      │                            │ 4. Send to Bob             │
-      │                            │    io.to(socket_xyz)       │
-      │                            │      .emit("new_message")  │
-      │                            │                            │
-      │                            ├───────────────────────────►│
-      │                            │                            │ Message appears
-      │◄───────────────────────────┤                            │
-      │ callback({success: true})  │                            │
-      │                            │                            │
-   Shows ✓                                                Shows message
-```
+## Core Concepts at a Glance
 
-### 1.3 Group Chat Flow
+| Term | Simple Explanation | Role in WebSocket Chat |
+|---|---|---|
+| `WebSocket` | A persistent two-way connection | The pipe messages travel through |
+| `Socket.IO` | A library built on WebSocket | Adds rooms, events, reconnection, and more |
+| `socket` | One user's connection to the server | Identifies a single connected client |
+| `socket.id` | Auto-assigned unique ID per connection | Used to target a specific user |
+| `room` | A named group of sockets | Powers group chats |
+| `event` | A named message type (like `'chat'`, `'join'`) | How client and server communicate |
+| `emit` | Sending an event with a payload | How you send any message |
+| `on` | Listening for an event | How you receive any message |
+| `broadcast` | Send to everyone except the sender | Used for "user joined" notifications |
+| `namespace` | A partitioned section of the server | Isolate different apps on one server |
+
+---
+
+## Architecture Overview
+
+> **Mental model:** The server is a post office. Every message goes through it. For 1-on-1 chat, the post office reads the address label and delivers to one person. For group chat, it reads the room name on the envelope and delivers to everyone in that room.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                 Team Chat (3 members in room)                       │
-└─────────────────────────────────────────────────────────────────────┘
-
-  ALICE                    SERVER                    BOB & CHARLIE
-    │                         │                            │
-    │ Click "Team Chat"       │                            │
-    │ emit("join_group",      │                            │
-    │   conversationId)       │                            │
-    ├────────────────────────►│                            │
-    │                         │ socket.join(convId)        │
-    │                         │ Room now has:              │
-    │                         │  [socket_abc,              │
-    │                         │   socket_xyz,              │
-    │                         │   socket_def]              │
-    │                         │                            │
-    │ Type "Team meeting 3pm" │                            │
-    │ emit("send_group_msg")  │                            │
-    ├────────────────────────►│                            │
-    │                         │ io.to(conversationId)      │
-    │                         │   .emit("new_group_msg")   │
-    │                         │        │                   │
-    │                         │        ├──────────────────►│ Bob receives
-    │                         │        └──────────────────►│ Charlie receives
-    │◄────────────────────────┤                            │
-    │ Alice also receives     │                            │
-    │ (included in broadcast) │                            │
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         WebSocket Chat Architecture                          │
+├──────────────────────────────────┬───────────────────────────────────────────┤
+│           CLIENT SIDE            │              SERVER SIDE                  │
+├──────────────────────────────────┼───────────────────────────────────────────┤
+│                                  │                                           │
+│  Browser A ──────────────────────┼──► socket.id: "abc123"  ─┐               │
+│  (User: Alice)                   │                           │               │
+│                                  │                           ▼               │
+│  Browser B ──────────────────────┼──► socket.id: "def456"  ─┤─► Room: ""    │
+│  (User: Bob)                     │                           │   (default)   │
+│                                  │                           │               │
+│  Browser C ──────────────────────┼──► socket.id: "ghi789"  ─┤               │
+│  (User: Carol)                   │                           │               │
+│                                  │                     ┌─────┘               │
+│                                  │                     │                     │
+│                                  │              Room: "group-xyz"            │
+│                                  │              (Alice + Carol are members)  │
+│                                  │                                           │
+│  Each browser runs               │  Server holds:                           │
+│  socket.io client lib            │  - Map of socket.id → username           │
+│  and maintains one               │  - Map of roomId → { name, members[] }   │
+│  persistent WebSocket            │  - Logic to route messages correctly      │
+│  connection to the server        │                                           │
+└──────────────────────────────────┴───────────────────────────────────────────┘
 ```
 
-### 1.4 File Sharing Flow
+---
+
+## WebSocket / Socket.IO API Reference
+
+The API is split into five groups. The client-side and server-side APIs mirror each other intentionally — both use `emit` and `on` with the same event names.
+
+---
+
+### Group 1 — Connection API
+
+> **Mental model:** Before any message can be sent, a connection must be established. This group covers how to open, monitor, and close that connection. Think of it as picking up the phone — everything else happens after the line is open.
+
+#### Client Side — `io(url, options)`
+
+- Connects the browser to the Socket.IO server
+- Returns a `socket` object representing this client's connection
+- Automatically reconnects if the connection drops
+
+```js
+// Basic connection
+const socket = io('http://localhost:3000');
+
+// With options
+const socket = io('http://localhost:3000', {
+  reconnection: true,          // Auto-reconnect on drop (default: true)
+  reconnectionAttempts: 5,     // Try 5 times before giving up
+  reconnectionDelay: 1000,     // Wait 1 second between retries
+  auth: { token: 'user-jwt' }  // Send auth data on connect (useful for login)
+});
+// ↑ The socket object is your handle to the connection.
+//   Store it globally — you'll use it for all sends and receives.
+```
+
+#### Client-Side Connection Events
+
+| Event | When it fires | What to do |
+|---|---|---|
+| `'connect'` | Connection established successfully | Enable UI, show "Online" status |
+| `'disconnect'` | Connection lost (network drop, server restart) | Show "Reconnecting..." |
+| `'connect_error'` | Connection attempt failed | Show error message |
+| `'reconnect'` | Successfully reconnected after a drop | Refresh message history |
+
+```js
+socket.on('connect', () => {
+  console.log('Connected! My ID:', socket.id);
+  // socket.id is a unique string like "AbCd1234" assigned by the server
+  // It changes every time you reconnect — don't use it as a permanent user ID
+});
+
+socket.on('disconnect', (reason) => {
+  // reason: 'io server disconnect' / 'transport close' / 'ping timeout'
+  updateStatus('🔴 Disconnected — ' + reason);
+});
+
+socket.on('reconnect', (attemptNumber) => {
+  updateStatus('🟢 Reconnected after ' + attemptNumber + ' attempt(s)');
+});
+```
+
+#### Server Side — Connection Handling
+
+| Method / Event | What it does |
+|---|---|
+| `io.on('connection', callback)` | Fires when any new client connects |
+| `socket.id` | This client's unique auto-assigned ID |
+| `socket.on('disconnect', callback)` | Fires when this client disconnects |
+| `socket.handshake.auth` | Auth data sent by the client on connect |
+| `socket.handshake.address` | IP address of the client |
+
+```js
+io.on('connection', (socket) => {
+  // This block runs ONCE per connecting client.
+  // 'socket' here represents THAT ONE CLIENT's connection.
+  // Every client gets their own separate 'socket' object.
+
+  console.log('User connected:', socket.id);
+
+  // Read auth data sent by the client
+  const token = socket.handshake.auth.token;
+  // ↑ Validate the token here to authenticate the user
+
+  socket.on('disconnect', (reason) => {
+    console.log('User disconnected:', socket.id, '—', reason);
+    // Clean up: remove from user map, notify their rooms, etc.
+  });
+});
+```
+
+---
+
+### Group 2 — Messaging API
+
+> **Mental model:** `emit` is "send a letter". `on` is "open your mailbox". The event name is the label on the envelope — both sides must use the same label for the message to be received. You can put anything you want inside the envelope (the payload).
+
+#### Sending Messages — `emit(event, payload)`
+
+| Call | Who receives it |
+|---|---|
+| `socket.emit('event', data)` | **Client:** sends to server. **Server:** sends to this one socket only |
+| `io.emit('event', data)` | Server → sends to **every connected client** |
+| `socket.broadcast.emit('event', data)` | Server → sends to **everyone except the sender** |
+| `io.to(roomId).emit('event', data)` | Server → sends to **everyone in a specific room** |
+| `socket.to(socketId).emit('event', data)` | Server → sends to **one specific client** by their socket ID |
+| `socket.to(roomId).emit('event', data)` | Server → sends to everyone in room **except the sender** |
+
+```js
+// ── CLIENT: Sending a chat message to the server ──────────────────────────────
+socket.emit('chat:message', {
+  text: 'Hello!',
+  to: 'def456',       // for 1-on-1: target socket ID
+  roomId: null        // for group: room ID, or null for 1-on-1
+});
+// ↑ 'chat:message' is the event name — a string you define.
+//   Using namespaced names like 'chat:message' keeps events organized.
+//   The second argument is the payload — any JSON-serializable value.
+
+// ── SERVER: Routing the message to the right recipient ───────────────────────
+socket.on('chat:message', (msg) => {
+  if (msg.roomId) {
+    // Group chat: deliver to everyone in the room
+    io.to(msg.roomId).emit('chat:message', msg);
+  } else {
+    // 1-on-1: deliver to one specific socket
+    socket.to(msg.to).emit('chat:message', msg);
+    socket.emit('chat:message', msg);  // also echo back to sender
+  }
+});
+```
+
+#### Receiving Messages — `on(event, callback)`
+
+```js
+// ── CLIENT: Listening for incoming messages ───────────────────────────────────
+socket.on('chat:message', (msg) => {
+  // msg is exactly what the server emitted as the payload
+  renderMessage(msg);
+});
+
+// ── SERVER: Listening for any event from a specific client ────────────────────
+socket.on('chat:message', (msg) => { /* handle */ });
+socket.on('user:typing', (data) => { /* handle */ });
+// ↑ Each socket.on() inside io.on('connection') is scoped to THAT client.
+//   You can listen for as many events as you need.
+```
+
+#### Acknowledgements (Confirmed Delivery)
+
+> **Mental model:** Normal `emit` is "fire and forget" — you send and move on. Acknowledgements are like sending a message and waiting for the recipient to say "got it" before continuing.
+
+```js
+// ── CLIENT: Emit with acknowledgement callback ────────────────────────────────
+socket.emit('chat:message', { text: 'Hello' }, (response) => {
+  // This callback fires when the SERVER calls the ack function
+  if (response.status === 'ok') {
+    markMessageDelivered();  // e.g., show a ✓ tick
+  }
+});
+
+// ── SERVER: Responding to the acknowledgement ─────────────────────────────────
+socket.on('chat:message', (msg, ack) => {
+  // ack is a function — call it to confirm delivery
+  saveMessage(msg);
+  ack({ status: 'ok', messageId: generateId() });
+  // ↑ This triggers the client's callback above
+});
+```
+
+---
+
+### Group 3 — Rooms API
+
+> **Mental model:** Rooms are like WhatsApp groups — the server manages a list of who's in each group. When you send to a room, the server delivers to everyone on that list. Joining and leaving a room is instant and costs nothing — it's just an entry in a Map on the server.
+
+#### Room Methods (Server Side Only)
+
+| Method | What it does |
+|---|---|
+| `socket.join(roomId)` | Add this socket to a room |
+| `socket.leave(roomId)` | Remove this socket from a room |
+| `io.to(roomId).emit(event, data)` | Send to everyone in a room (including sender) |
+| `socket.to(roomId).emit(event, data)` | Send to everyone in a room (excluding sender) |
+| `io.in(roomId).fetchSockets()` | Get array of all socket objects in a room |
+| `socket.rooms` | Set of all room IDs this socket is currently in |
+
+```js
+// ── Joining a room ────────────────────────────────────────────────────────────
+socket.on('room:join', (roomId) => {
+  socket.join(roomId);
+  // ↑ This socket is now in the room. Future io.to(roomId).emit() reach it.
+
+  // Tell everyone else in the room that a new user joined
+  socket.to(roomId).emit('room:user-joined', {
+    userId: socket.id,
+    username: users.get(socket.id)
+  });
+  // ↑ socket.to() excludes the sender — they already know they joined
+});
+
+// ── Leaving a room ────────────────────────────────────────────────────────────
+socket.on('room:leave', (roomId) => {
+  socket.leave(roomId);
+  socket.to(roomId).emit('room:user-left', { userId: socket.id });
+});
+
+// ── Sending to everyone in a room ─────────────────────────────────────────────
+socket.on('chat:message', (msg) => {
+  io.to(msg.roomId).emit('chat:message', msg);
+  // ↑ io.to() includes the sender — good for group messages
+  //   so the sender sees their own message confirmed from the server
+});
+```
+
+---
+
+### Group 4 — Server Broadcast Targets
+
+> **Mental model:** This is a targeting system. When you fire a message, you need to tell Socket.IO who should receive it. Think of it like a megaphone with different range settings — whisper to one person, speak to a room, or shout to everyone.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│              Sending image.jpg to recipient                         │
-└─────────────────────────────────────────────────────────────────────┘
+WHO RECEIVES THE MESSAGE — Quick Visual Reference
 
-  CLIENT                         SERVER
-    │                               │
-    │ Select image.jpg              │
-    │                               │
-    │ 1. HTTP POST /api/upload      │
-    │    (with file in FormData)    │
-    ├──────────────────────────────►│
-    │                               │ Save to /uploads/
-    │                               │ Generate URL
-    │                               │
-    │◄──────────────────────────────┤
-    │ { url: "/uploads/123.jpg",    │
-    │   messageType: "image" }      │
-    │                               │
-    │ 2. emit("send_direct_message",│
-    │    { recipientId,             │
-    │      content: "Check this!",  │
-    │      file: {url, type} })     │
-    ├──────────────────────────────►│
-    │                               │ Save message with
-    │                               │ file reference
-    │                               │ Send to recipient
-    │                               │
-    
-Recipient receives: {
-  content: "Check this!",
-  file: { url: "/uploads/123.jpg", type: "image" }
+  socket.emit(...)                 →  Just this one client (or client→server)
+  socket.to(socketId).emit(...)    →  One specific other client
+  socket.broadcast.emit(...)       →  Everyone EXCEPT this socket
+  socket.to(roomId).emit(...)      →  Everyone in room EXCEPT this socket
+  io.to(roomId).emit(...)          →  Everyone in room INCLUDING this socket
+  io.emit(...)                     →  Every connected client on the server
+```
+
+```js
+// Real-world example: User sends a group message
+socket.on('chat:message', (msg) => {
+  // Attach server-side metadata before broadcasting
+  const enrichedMsg = {
+    ...msg,
+    senderId: socket.id,
+    senderName: users.get(socket.id),
+    timestamp: Date.now()
+    // ↑ Always add timestamp on the server — don't trust client timestamps
+  };
+
+  io.to(msg.roomId).emit('chat:message', enrichedMsg);
+  //  ↑ io.to() includes the sender, so they see their own message
+  //    with the server's timestamp — ensures consistency across all clients
+});
+```
+
+---
+
+### Group 5 — File Transfer API
+
+> **Mental model:** A text message is like a sticky note — small, send instantly. A file is like a package — you need different handling based on size. Small files (under ~1MB) can go as one chunk. Large files must be split into pieces (chunks), sent one at a time, and reassembled on the other end.
+
+#### Small Files (under ~1MB) — Send as Base64 in one message
+
+```js
+// ── CLIENT: Read file and send in one emit ────────────────────────────────────
+document.getElementById('file-input').onchange = async (event) => {
+  const file = event.target.files[0];
+
+  // Guard: reject files over 1MB for this "small" path
+  if (file.size > 1 * 1024 * 1024) {
+    return sendLargeFile(file);  // hand off to chunked sender (see below)
+  }
+
+  // FileReader converts the file to a Base64 string
+  const base64 = await fileToBase64(file);
+
+  socket.emit('file:send', {
+    name: file.name,         // original filename
+    type: file.type,         // MIME type: 'image/png', 'application/pdf', etc.
+    size: file.size,         // bytes
+    data: base64,            // the full file content as a Base64 string
+    to: targetSocketId,      // 1-on-1 target, or null for group
+    roomId: currentRoomId    // group target, or null for 1-on-1
+  });
+};
+
+// Helper: wraps FileReader in a Promise for async/await use
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result.split(',')[1]);
+    //                                               ↑ strip the "data:image/png;base64," prefix
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
-Display: <img src="/uploads/123.jpg" />
+// ── CLIENT: Receive a small file ──────────────────────────────────────────────
+socket.on('file:receive', (fileMsg) => {
+  // Reconstruct a download link from the Base64 data
+  const bytes  = Uint8Array.from(atob(fileMsg.data), c => c.charCodeAt(0));
+  const blob   = new Blob([bytes], { type: fileMsg.type });
+  const url    = URL.createObjectURL(blob);
+
+  const link   = document.createElement('a');
+  link.href    = url;
+  link.download = fileMsg.name;
+  link.textContent = `📎 ${fileMsg.name} (${formatBytes(fileMsg.size)})`;
+  chatDiv.appendChild(link);
+});
 ```
 
----
+#### Large Files — Chunked Transfer
 
-## 2. Project Structure & Startup
+> **Mental model:** Imagine sending a large poster through a mail slot that only fits envelopes. You cut the poster into numbered pieces, send them one by one, and the receiver tapes them back together in order. That's chunking.
 
-### 2.1 Folder Structure
-
-```text
-chat-app/
-├── src/
-│   ├── server.js                # Entry point
-│   ├── app.js                   # Express config
-│   ├── config/
-│   │   ├── database.js          # MongoDB connection
-│   │   └── socketio.js          # Socket.io setup
-│   ├── models/
-│   │   ├── User.model.js
-│   │   ├── Conversation.model.js
-│   │   └── Message.model.js
-│   ├── middlewares/
-│   │   └── auth.middleware.js   # JWT verification
-│   ├── socket/
-│   │   ├── directMessages.js
-│   │   └── groupMessages.js
-│   └── routes/
-│       └── upload.routes.js
-├── uploads/
-├── .env
-└── package.json
 ```
+CHUNKED FILE TRANSFER — How it works
 
-### 2.2 Server Entry Point
-
-**File**: `src/server.js`
+  Sender                              Server                     Receiver
+    │                                    │                           │
+    │─── file:chunk-start ──────────────►│──── file:chunk-start ────►│
+    │    { name, type, size, totalChunks,│    (forwarded to target)  │
+    │      transferId }                  │                           │
+    │                                    │                           │
+    │─── file:chunk ────────────────────►│──── file:chunk ──────────►│
+    │    { transferId, index: 0, data }  │                           │
+    │─── file:chunk ────────────────────►│──── file:chunk ──────────►│
+    │    { transferId, index: 1, data }  │                           │
+    │         ... (N chunks total)       │                           │
+    │─── file:chunk-end ────────────────►│──── file:chunk-end ──────►│
+    │    { transferId }                  │    Receiver reassembles   │
+    │                                    │    chunks in order        │
+    │◄── file:chunk-ack ─────────────────┤◄── file:chunk-ack ────────│
+    │    { transferId, receivedChunks }  │    (confirms completion)  │
+```
 
 ```js
-require("dotenv").config();
-const http = require("http");
-const app = require("./app");
-const connectDB = require("./config/database");
-const setupSocketIO = require("./config/socketio");
+// ── CLIENT: Send a large file in chunks ───────────────────────────────────────
+const CHUNK_SIZE = 64 * 1024;  // 64KB per chunk — sweet spot for Socket.IO
 
-const server = http.createServer(app);
+async function sendLargeFile(file) {
+  const transferId   = crypto.randomUUID();   // unique ID for this transfer
+  const totalChunks  = Math.ceil(file.size / CHUNK_SIZE);
+  const arrayBuffer  = await file.arrayBuffer();
 
-// CRITICAL ORDER: Database → Socket.io → Listen
-connectDB()
-  .then(() => {
-    console.log("✓ MongoDB connected");
-    
-    const io = setupSocketIO(server);
-    app.set("io", io);  // Make accessible in routes
-    
-    server.listen(3000, () => {
-      console.log("✓ Server running on port 3000");
-    });
-  })
-  .catch((error) => {
-    console.error("✗ MongoDB failed:", error);
-    process.exit(1);
+  // Step 1: Announce the incoming transfer
+  socket.emit('file:chunk-start', {
+    transferId,
+    name: file.name,
+    type: file.type,
+    size: file.size,
+    totalChunks,
+    to: targetSocketId,
+    roomId: currentRoomId
   });
-```
 
-### 2.3 Express App
+  // Step 2: Send the file slice by slice
+  for (let i = 0; i < totalChunks; i++) {
+    const start  = i * CHUNK_SIZE;
+    const end    = Math.min(start + CHUNK_SIZE, file.size);
+    const slice  = arrayBuffer.slice(start, end);
 
-**File**: `src/app.js`
+    // Convert slice to Base64 for JSON transport
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(slice)));
 
-```js
-const express = require("express");
-const cors = require("cors");
-const path = require("path");
-const uploadRoutes = require("./routes/upload.routes");
+    socket.emit('file:chunk', {
+      transferId,
+      index: i,          // chunk number — receiver uses this to reassemble in order
+      data: base64
+    });
 
-const app = express();
+    // Update progress bar
+    const progress = Math.round(((i + 1) / totalChunks) * 100);
+    updateProgress(transferId, progress);
 
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
-app.use(express.json());
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+    // Yield to the event loop every 10 chunks to keep UI responsive
+    if (i % 10 === 0) await new Promise(r => setTimeout(r, 0));
+  }
 
-app.use("/api/upload", uploadRoutes);
+  // Step 3: Signal that all chunks have been sent
+  socket.emit('file:chunk-end', { transferId });
+}
 
-module.exports = app;
+// ── CLIENT: Receive a large file (reassemble chunks) ─────────────────────────
+const incomingTransfers = new Map();
+// ↑ Holds partially received files, keyed by transferId
+//   { meta: {...}, chunks: [], receivedCount: 0 }
+
+socket.on('file:chunk-start', (meta) => {
+  // Prepare a slot to receive chunks
+  incomingTransfers.set(meta.transferId, {
+    meta,
+    chunks: new Array(meta.totalChunks),  // pre-sized array, indexed by chunk order
+    receivedCount: 0
+  });
+  showTransferProgress(meta);
+});
+
+socket.on('file:chunk', ({ transferId, index, data }) => {
+  const transfer = incomingTransfers.get(transferId);
+  if (!transfer) return;
+
+  transfer.chunks[index] = data;   // store chunk at its correct position
+  transfer.receivedCount++;
+
+  const progress = Math.round((transfer.receivedCount / transfer.meta.totalChunks) * 100);
+  updateProgress(transferId, progress);
+});
+
+socket.on('file:chunk-end', ({ transferId }) => {
+  const transfer = incomingTransfers.get(transferId);
+  if (!transfer) return;
+
+  // Reassemble: decode each Base64 chunk back to binary, stitch together
+  const byteArrays = transfer.chunks.map(b64 =>
+    Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+  );
+
+  // Merge all Uint8Arrays into one
+  const totalBytes = byteArrays.reduce((sum, a) => sum + a.length, 0);
+  const merged     = new Uint8Array(totalBytes);
+  let   offset     = 0;
+  for (const arr of byteArrays) {
+    merged.set(arr, offset);
+    offset += arr.length;
+  }
+
+  // Create a download link
+  const blob = new Blob([merged], { type: transfer.meta.type });
+  const url  = URL.createObjectURL(blob);
+  renderFileLink(url, transfer.meta);
+  incomingTransfers.delete(transferId);  // clean up
+});
 ```
 
 ---
 
-## 3. Database Schemas
+## Full Connection & Message Flow
 
-### 3.1 User Schema
+> **Mental model:** Think of this like a restaurant. The server (waiter) is always running. Each customer (client) sits down (connects) and gets a table number (`socket.id`). They can order from any table (send messages). The waiter routes orders to the right kitchen station (room) or another customer (1-on-1). Nobody talks to each other directly — everything goes through the waiter.
 
-**File**: `src/models/User.model.js`
-
-```js
-const mongoose = require("mongoose");
-
-const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
-  email: { type: String, required: true, unique: true },
-  passwordHash: { type: String, required: true },
-  avatar: String,
-  
-  // For presence tracking
-  isOnline: { type: Boolean, default: false },
-  lastSeen: { type: Date, default: Date.now },
-  socketId: String  // Current socket ID when connected
-}, { timestamps: true });
-
-module.exports = mongoose.model("User", userSchema);
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                     WebSocket Chat — Full Message Flow                       │
+├──────────────────────┬───────────────────────┬───────────────────────────────┤
+│   Client (Browser)   │      Socket.IO        │     Other Client(s)           │
+├──────────────────────┼───────────────────────┼───────────────────────────────┤
+│                      │                       │                               │
+│  io('localhost:3000')│                       │                               │
+│  ──────────────────► WebSocket handshake     │                               │
+│  ◄────────────────── socket.id = 'abc'       │                               │
+│                      │                       │                               │
+│  emit('user:register'│                       │                               │
+│  { username: 'Alice'}│                       │                               │
+│  ──────────────────► users.set('abc','Alice')│                               │
+│                      │                       │                               │
+│  ─────── 1-ON-1 CHAT PATH ─────────────────────────────────────────────────  │
+│                      │                       │                               │
+│  emit('chat:message' │                       │                               │
+│  { to:'def', text }) │                       │                               │
+│  ──────────────────► socket.to('def')        │                               │
+│                      │ .emit('chat:message') ►│  socket.on('chat:message')   │
+│                      │                       │  renderMessage()              │
+│                      │                       │                               │
+│  ─────── GROUP CHAT PATH ───────────────────────────────────────────────────  │
+│                      │                       │                               │
+│  emit('room:join'    │                       │                               │
+│  { roomId:'xyz' })   │                       │                               │
+│  ──────────────────► socket.join('xyz')      │                               │
+│                      │ .to('xyz').emit(      │                               │
+│                      │  'room:user-joined') ─►│  (members notified)         │
+│                      │                       │                               │
+│  emit('chat:message' │                       │                               │
+│  { roomId:'xyz',text}│                       │                               │
+│  ──────────────────► io.to('xyz').emit(      │                               │
+│                      │  'chat:message')      │                               │
+│                      │  ─────────────────────►  (all room members receive)  │
+│                      │  ◄────────────────────  (sender also receives it)    │
+│                      │                       │                               │
+│  ─────── FILE TRANSFER PATH ────────────────────────────────────────────────  │
+│                      │                       │                               │
+│  emit('file:chunk-   │                       │                               │
+│   start', metadata)  │                       │                               │
+│  ──────────────────► forward to target(s) ──►│  prepare transfer slot       │
+│  emit('file:chunk')  │                       │                               │
+│  × N times ─────────► forward each chunk ───►│  store chunk by index        │
+│  emit('file:chunk-   │                       │                               │
+│   end')              │                       │                               │
+│  ──────────────────► forward ────────────────►│  reassemble → download link │
+│                      │                       │                               │
+│  ─────── DISCONNECT ────────────────────────────────────────────────────────  │
+│                      │                       │                               │
+│  (tab closed /       │                       │                               │
+│   network drop)      │                       │                               │
+│  ──────────────────► socket.on('disconnect') │                               │
+│                      │ remove from users map │                               │
+│                      │ notify rooms ─────────►│  'room:user-left' event     │
+└──────────────────────┴───────────────────────┴───────────────────────────────┘
 ```
 
-### 3.2 Conversation Schema
+---
 
-**File**: `src/models/Conversation.model.js`
+## Step-by-Step Implementation
+
+### Project Structure
+
+```
+project/
+├── server.js       ← Node.js server (Socket.IO + Express)
+└── client.html     ← Browser client (Socket.IO client)
+```
+
+**Install dependencies:**
+```bash
+npm install express socket.io
+```
+**Run server:**
+```bash
+node server.js
+```
+**Test:** Open `http://localhost:3000` in multiple browser tabs to simulate multiple users.
+
+---
+
+### server.js — Complete Annotated Server
 
 ```js
-const mongoose = require("mongoose");
+// ══════════════════════════════════════════════════════════════════════════════
+//  server.js — Socket.IO Chat Server
+//  Handles: registration, 1-on-1 chat, group rooms, file transfer
+// ══════════════════════════════════════════════════════════════════════════════
 
-const conversationSchema = new mongoose.Schema({
-  type: { 
-    type: String, 
-    enum: ["direct", "group"], 
-    required: true 
-  },
-  participants: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true
-  }],
-  
-  // Group-specific
-  name: String,          // "Team Chat"
-  avatar: String,
-  admin: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User"
-  },
-  
-  // Denormalized for conversation list
-  lastMessage: {
-    content: String,
-    sender: mongoose.Schema.Types.ObjectId,
-    timestamp: Date,
-    messageType: String
+const express = require('express');
+const http    = require('http');
+const { Server } = require('socket.io');
+
+const app    = express();
+const server = http.createServer(app);
+const io     = new Server(server, {
+  maxHttpBufferSize: 10 * 1024 * 1024  // Allow up to 10MB per message (for file chunks)
+  // ↑ Default is 1MB — raise it or chunked files will be silently dropped
+});
+
+app.use(express.static(__dirname));  // Serve client.html at http://localhost:3000
+
+
+// ── SERVER STATE ───────────────────────────────────────────────────────────────
+// In production, store this in a database (Redis, MongoDB, etc.)
+// For this demo, plain Maps in memory are fine.
+
+const users = new Map();
+// users: socketId → { username, socketId }
+// e.g.  'abc123' → { username: 'Alice', socketId: 'abc123' }
+
+const rooms = new Map();
+// rooms: roomId → { id, name, members: Set<socketId>, createdBy, createdAt }
+// e.g.  'xyz789' → { id: 'xyz789', name: 'Study Group', members: Set{'abc','def'}, ... }
+
+
+// ── HELPERS ────────────────────────────────────────────────────────────────────
+
+function generateId() {
+  return Math.random().toString(36).slice(2, 10);
+  // Produces 8-char alphanumeric strings like 'a3f9b2c1'
+  // Use crypto.randomUUID() in production for proper uniqueness
+}
+
+function getUserList() {
+  // Returns array of all online users — sent to clients on request
+  return Array.from(users.values());
+}
+
+function getRoomList() {
+  // Returns rooms as plain objects with members as arrays (not Sets, which aren't JSON-safe)
+  return Array.from(rooms.values()).map(r => ({
+    ...r,
+    members: Array.from(r.members).map(id => users.get(id)).filter(Boolean)
+    // ↑ Convert member socket IDs to user objects, filtering out any stale IDs
+  }));
+}
+
+
+// ── MAIN CONNECTION HANDLER ────────────────────────────────────────────────────
+
+io.on('connection', (socket) => {
+  console.log('Socket connected:', socket.id);
+
+
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │  USER REGISTRATION                                                      │
+  // │  Client emits this right after connecting to give themselves a username │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  socket.on('user:register', ({ username }, ack) => {
+    const user = { username, socketId: socket.id };
+    users.set(socket.id, user);
+
+    // Confirm registration with the sender
+    if (ack) ack({ status: 'ok', user });
+
+    // Tell all OTHER clients that a new user is online
+    socket.broadcast.emit('user:online', user);
+
+    // Send the new user a snapshot of current state
+    socket.emit('state:init', {
+      users: getUserList(),     // everyone currently online
+      rooms: getRoomList()      // all existing rooms
+    });
+  });
+
+
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │  1-ON-1 CHAT                                                            │
+  // │  Routed by target socket ID — only the addressed client receives it     │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  socket.on('chat:dm', ({ to, text }, ack) => {
+    const sender = users.get(socket.id);
+    if (!sender) return;
+
+    const msg = {
+      id: generateId(),
+      text,
+      from: sender,
+      to,
+      timestamp: Date.now(),
+      type: 'text'
+    };
+
+    // Deliver to recipient
+    socket.to(to).emit('chat:dm', msg);
+    // Echo back to sender (so they see it in their own chat window)
+    socket.emit('chat:dm', msg);
+
+    if (ack) ack({ status: 'ok', messageId: msg.id });
+  });
+
+
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │  GROUP ROOMS — CREATE                                                   │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  socket.on('room:create', ({ name }, ack) => {
+    const creator = users.get(socket.id);
+    if (!creator) return;
+
+    const room = {
+      id: generateId(),
+      name,
+      members: new Set([socket.id]),  // creator is automatically a member
+      createdBy: socket.id,
+      createdAt: Date.now()
+    };
+
+    rooms.set(room.id, room);
+    socket.join(room.id);
+    // ↑ socket.join() is the Socket.IO call that adds this socket to the room.
+    //   After this, io.to(room.id).emit() will reach this user.
+
+    if (ack) ack({ status: 'ok', room: { ...room, members: [creator] } });
+
+    // Tell all clients a new room exists
+    io.emit('room:created', {
+      ...room,
+      members: Array.from(room.members).map(id => users.get(id)).filter(Boolean)
+    });
+  });
+
+
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │  GROUP ROOMS — JOIN                                                     │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  socket.on('room:join', ({ roomId }, ack) => {
+    const room = rooms.get(roomId);
+    const user = users.get(socket.id);
+    if (!room || !user) return;
+
+    room.members.add(socket.id);
+    socket.join(roomId);
+
+    if (ack) ack({ status: 'ok' });
+
+    // Notify everyone else in the room
+    socket.to(roomId).emit('room:user-joined', { roomId, user });
+
+    // Send the new member a list of who's already in the room
+    socket.emit('room:member-list', {
+      roomId,
+      members: Array.from(room.members).map(id => users.get(id)).filter(Boolean)
+    });
+  });
+
+
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │  GROUP ROOMS — LEAVE                                                    │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  socket.on('room:leave', ({ roomId }) => {
+    const room = rooms.get(roomId);
+    const user = users.get(socket.id);
+    if (!room) return;
+
+    room.members.delete(socket.id);
+    socket.leave(roomId);
+
+    // Notify remaining members
+    socket.to(roomId).emit('room:user-left', { roomId, user });
+
+    // Optional: delete empty rooms
+    if (room.members.size === 0) {
+      rooms.delete(roomId);
+      io.emit('room:deleted', { roomId });
+    }
+  });
+
+
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │  GROUP CHAT MESSAGE                                                     │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  socket.on('chat:group', ({ roomId, text }, ack) => {
+    const room   = rooms.get(roomId);
+    const sender = users.get(socket.id);
+    if (!room || !sender) return;
+    if (!room.members.has(socket.id)) return;  // must be a member to send
+
+    const msg = {
+      id: generateId(),
+      text,
+      from: sender,
+      roomId,
+      timestamp: Date.now(),
+      type: 'text'
+    };
+
+    io.to(roomId).emit('chat:group', msg);
+    // ↑ io.to() includes the sender — they see their own message confirmed from server
+    if (ack) ack({ status: 'ok', messageId: msg.id });
+  });
+
+
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │  TYPING INDICATOR                                                       │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  socket.on('user:typing', ({ to, roomId, isTyping }) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+
+    const payload = { user, isTyping };
+
+    if (roomId) {
+      socket.to(roomId).emit('user:typing', { ...payload, roomId });
+      //  ↑ socket.to() excludes sender — no need to show "you are typing"
+    } else if (to) {
+      socket.to(to).emit('user:typing', { ...payload, to: socket.id });
+    }
+  });
+
+
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │  FILE TRANSFER — SMALL FILES (sent as one Base64 blob)                  │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  socket.on('file:send', (fileMsg) => {
+    const sender = users.get(socket.id);
+    if (!sender) return;
+
+    const enriched = { ...fileMsg, from: sender, timestamp: Date.now() };
+
+    if (fileMsg.roomId) {
+      io.to(fileMsg.roomId).emit('file:receive', enriched);
+    } else if (fileMsg.to) {
+      socket.to(fileMsg.to).emit('file:receive', enriched);
+      socket.emit('file:receive', enriched);  // echo to sender
+    }
+  });
+
+
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │  FILE TRANSFER — LARGE FILES (chunked relay)                            │
+  // │  Server acts as a pure relay — it doesn't store chunks                 │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  socket.on('file:chunk-start', (meta) => {
+    const sender   = users.get(socket.id);
+    const enriched = { ...meta, from: sender };
+    if (meta.roomId) {
+      socket.to(meta.roomId).emit('file:chunk-start', enriched);
+    } else if (meta.to) {
+      socket.to(meta.to).emit('file:chunk-start', enriched);
+    }
+  });
+
+  socket.on('file:chunk', ({ transferId, index, data, to, roomId }) => {
+    // Forward the chunk as-is to the target — server never buffers it
+    if (roomId) {
+      socket.to(roomId).emit('file:chunk', { transferId, index, data });
+    } else if (to) {
+      socket.to(to).emit('file:chunk', { transferId, index, data });
+    }
+  });
+
+  socket.on('file:chunk-end', ({ transferId, to, roomId }) => {
+    if (roomId) {
+      socket.to(roomId).emit('file:chunk-end', { transferId });
+    } else if (to) {
+      socket.to(to).emit('file:chunk-end', { transferId });
+      socket.emit('file:chunk-end', { transferId });  // ack to sender
+    }
+  });
+
+
+  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // │  DISCONNECT                                                             │
+  // └─────────────────────────────────────────────────────────────────────────┘
+  socket.on('disconnect', () => {
+    const user = users.get(socket.id);
+    if (!user) return;
+
+    // Remove from all rooms they were in
+    rooms.forEach((room, roomId) => {
+      if (room.members.has(socket.id)) {
+        room.members.delete(socket.id);
+        socket.to(roomId).emit('room:user-left', { roomId, user });
+        if (room.members.size === 0) {
+          rooms.delete(roomId);
+          io.emit('room:deleted', { roomId });
+        }
+      }
+    });
+
+    users.delete(socket.id);
+    io.emit('user:offline', { socketId: socket.id });
+    // ↑ io.emit() (not socket.emit) because the socket is already gone
+  });
+
+});
+
+
+server.listen(3000, () => console.log('Server running → http://localhost:3000'));
+```
+
+---
+
+### client.html — Complete Annotated Client
+
+#### HTML Structure
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebSocket Chat</title>
+  <style>
+    body        { display: flex; font-family: Arial, sans-serif; margin: 0; }
+    #sidebar    { width: 220px; border-right: 1px solid #ccc; padding: 12px; height: 100vh; overflow-y: auto; }
+    #main       { flex: 1; display: flex; flex-direction: column; padding: 12px; }
+    #messages   { flex: 1; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; margin-bottom: 8px; min-height: 300px; }
+    #input-area { display: flex; gap: 8px; }
+    #msg-input  { flex: 1; padding: 8px; }
+    .msg        { margin: 4px 0; }
+    .msg.me     { text-align: right; color: #1a6fbb; }
+    .msg.system { color: #888; font-style: italic; font-size: 0.9em; }
+    #typing     { color: #888; font-size: 0.85em; height: 18px; }
+    #status     { font-weight: bold; margin-bottom: 8px; }
+    .room-item  { cursor: pointer; padding: 4px; border-radius: 4px; }
+    .room-item:hover { background: #f0f0f0; }
+    .room-item.active { background: #d0e8ff; }
+    progress    { width: 100%; margin: 4px 0; }
+  </style>
+</head>
+<body>
+
+  <div id="sidebar">
+    <div id="status">⚪ Connecting...</div>
+    <hr>
+    <b>Users Online</b>
+    <div id="user-list"></div>
+    <hr>
+    <b>Rooms</b>
+    <div id="room-list"></div>
+    <button id="create-room-btn">+ New Room</button>
+  </div>
+
+  <div id="main">
+    <div id="chat-header">Select a user or room to chat</div>
+    <div id="messages"></div>
+    <div id="typing"></div>
+    <div id="input-area">
+      <input id="msg-input" placeholder="Type a message..." />
+      <button id="send-btn">Send</button>
+      <input id="file-input" type="file" style="display:none" />
+      <button id="attach-btn">📎</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.8.3/socket.io.min.js"></script>
+  <script>
+    /* all JavaScript below */
+  </script>
+</body>
+</html>
+```
+
+#### JavaScript — Step by Step
+
+**Step 1 — Setup and connect**
+
+```js
+// ── Global State ──────────────────────────────────────────────────────────────
+let currentTarget = null;
+// currentTarget: { type: 'dm', socketId: '...' } | { type: 'room', roomId: '...' }
+// ↑ Tracks which conversation is currently open in the UI
+
+let myUsername  = null;    // set after registration
+let mySocketId  = null;    // set after 'connect' event
+let typingTimer = null;    // debounce handle for typing indicator
+
+// ── DOM References ────────────────────────────────────────────────────────────
+const statusEl   = document.getElementById('status');
+const messagesEl = document.getElementById('messages');
+const typingEl   = document.getElementById('typing');
+const msgInput   = document.getElementById('msg-input');
+const userListEl = document.getElementById('user-list');
+const roomListEl = document.getElementById('room-list');
+
+// ── Connect to server ─────────────────────────────────────────────────────────
+const socket = io('http://localhost:3000');
+
+socket.on('connect', () => {
+  mySocketId = socket.id;
+  statusEl.textContent = '🟢 Connected';
+
+  // Prompt for username and register with the server
+  myUsername = prompt('Enter your username:') || 'User_' + socket.id.slice(0, 4);
+  socket.emit('user:register', { username: myUsername }, (res) => {
+    // res is the acknowledgement from the server
+    if (res.status === 'ok') statusEl.textContent = `🟢 ${myUsername}`;
+  });
+});
+
+socket.on('disconnect', () => {
+  statusEl.textContent = '🔴 Disconnected';
+});
+```
+
+**Step 2 — User list and online/offline events**
+
+```js
+// ── Receive initial snapshot of all users and rooms ───────────────────────────
+socket.on('state:init', ({ users, rooms }) => {
+  renderUserList(users);
+  renderRoomList(rooms);
+});
+
+// ── A new user came online ─────────────────────────────────────────────────────
+socket.on('user:online', (user) => {
+  appendToUserList(user);
+  appendSystemMessage(`${user.username} came online`);
+});
+
+// ── A user went offline ────────────────────────────────────────────────────────
+socket.on('user:offline', ({ socketId }) => {
+  removeFromUserList(socketId);
+  // If we were in a DM with them, note they're gone
+  if (currentTarget?.type === 'dm' && currentTarget.socketId === socketId) {
+    appendSystemMessage('User disconnected');
   }
-}, { timestamps: true });
+});
 
-conversationSchema.index({ participants: 1, type: 1 });
+// ── Render functions ──────────────────────────────────────────────────────────
+function renderUserList(users) {
+  userListEl.innerHTML = '';
+  users.forEach(appendToUserList);
+}
 
-module.exports = mongoose.model("Conversation", conversationSchema);
+function appendToUserList(user) {
+  if (user.socketId === mySocketId) return;  // don't show yourself
+  const el = document.createElement('div');
+  el.textContent  = user.username;
+  el.dataset.id   = user.socketId;
+  el.className    = 'room-item';
+  el.onclick      = () => openDM(user);
+  userListEl.appendChild(el);
+}
+
+function removeFromUserList(socketId) {
+  userListEl.querySelector(`[data-id="${socketId}"]`)?.remove();
+}
 ```
 
-### 3.3 Message Schema
-
-**File**: `src/models/Message.model.js`
+**Step 3 — 1-on-1 (DM) chat**
 
 ```js
-const mongoose = require("mongoose");
+// ── Open a DM with a user ─────────────────────────────────────────────────────
+function openDM(user) {
+  currentTarget = { type: 'dm', socketId: user.socketId, username: user.username };
+  document.getElementById('chat-header').textContent = `DM: ${user.username}`;
+  messagesEl.innerHTML = '';
+  // In production: load message history from server here
+}
 
-const messageSchema = new mongoose.Schema({
-  conversationId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Conversation",
-    required: true,
-    index: true
-  },
-  sender: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true
-  },
-  content: String,
-  messageType: {
-    type: String,
-    enum: ["text", "image", "video", "audio", "file"],
-    default: "text"
-  },
-  file: {
-    url: String,
-    filename: String,
-    size: Number,
-    mimetype: String
-  },
-  status: {
-    type: String,
-    enum: ["sent", "delivered", "read"],
-    default: "sent"
-  },
-  readBy: [{
-    user: mongoose.Schema.Types.ObjectId,
-    readAt: Date
-  }]
-}, { timestamps: true });
+// ── Send a DM ─────────────────────────────────────────────────────────────────
+function sendDM(text) {
+  socket.emit('chat:dm', { to: currentTarget.socketId, text }, (res) => {
+    if (res?.status !== 'ok') appendSystemMessage('Message failed to deliver');
+  });
+}
 
-messageSchema.index({ conversationId: 1, createdAt: -1 });
+// ── Receive a DM ─────────────────────────────────────────────────────────────
+socket.on('chat:dm', (msg) => {
+  // Only render if it belongs to the currently open conversation
+  const isCurrentConvo =
+    currentTarget?.type === 'dm' &&
+    (msg.from.socketId === currentTarget.socketId ||
+     msg.from.socketId === mySocketId);
 
-module.exports = mongoose.model("Message", messageSchema);
+  if (isCurrentConvo) renderMessage(msg);
+  else notifyUnread(msg.from.socketId);  // flash the sender's name in sidebar
+});
 ```
 
-### 3.4 Database Connection
-
-**File**: `src/config/database.js`
+**Step 4 — Creating and joining group rooms**
 
 ```js
-const mongoose = require("mongoose");
+// ── Create a new room ─────────────────────────────────────────────────────────
+document.getElementById('create-room-btn').onclick = () => {
+  const name = prompt('Room name:');
+  if (!name) return;
 
-const connectDB = async () => {
-  try {
-    await mongoose.connect(process.env.MONGO_URI, {
-      maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000
-    });
-    
-    mongoose.connection.on("error", (err) => {
-      console.error("MongoDB error:", err);
-    });
-    
-  } catch (error) {
-    console.error("MongoDB connection error:", error);
-    throw error;
+  socket.emit('room:create', { name }, (res) => {
+    if (res.status === 'ok') openRoom(res.room);
+    // ↑ The ack gives us the room object immediately —
+    //   we don't have to wait for the 'room:created' broadcast
+  });
+};
+
+// ── A new room was created (by anyone) ───────────────────────────────────────
+socket.on('room:created', (room) => {
+  appendToRoomList(room);
+});
+
+// ── Join an existing room ─────────────────────────────────────────────────────
+function joinRoom(room) {
+  socket.emit('room:join', { roomId: room.id }, (res) => {
+    if (res.status === 'ok') openRoom(room);
+  });
+}
+
+// ── Open a room in the chat window ───────────────────────────────────────────
+function openRoom(room) {
+  currentTarget = { type: 'room', roomId: room.id, name: room.name };
+  document.getElementById('chat-header').textContent = `# ${room.name}`;
+  messagesEl.innerHTML = '';
+  // Highlight active room in sidebar
+  document.querySelectorAll('.room-item').forEach(el => el.classList.remove('active'));
+  document.querySelector(`[data-room-id="${room.id}"]`)?.classList.add('active');
+}
+
+// ── Leave current room ────────────────────────────────────────────────────────
+function leaveCurrentRoom() {
+  if (currentTarget?.type !== 'room') return;
+  socket.emit('room:leave', { roomId: currentTarget.roomId });
+  currentTarget = null;
+  messagesEl.innerHTML = '';
+  document.getElementById('chat-header').textContent = 'Select a user or room';
+}
+
+// ── Someone joined/left our current room ─────────────────────────────────────
+socket.on('room:user-joined', ({ roomId, user }) => {
+  if (currentTarget?.roomId === roomId)
+    appendSystemMessage(`${user.username} joined`);
+});
+
+socket.on('room:user-left', ({ roomId, user }) => {
+  if (currentTarget?.roomId === roomId)
+    appendSystemMessage(`${user.username} left`);
+});
+
+socket.on('room:deleted', ({ roomId }) => {
+  document.querySelector(`[data-room-id="${roomId}"]`)?.remove();
+  if (currentTarget?.roomId === roomId) {
+    currentTarget = null;
+    appendSystemMessage('This room was deleted');
+  }
+});
+
+// ── Render functions ──────────────────────────────────────────────────────────
+function renderRoomList(rooms) {
+  roomListEl.innerHTML = '';
+  rooms.forEach(appendToRoomList);
+}
+
+function appendToRoomList(room) {
+  const el = document.createElement('div');
+  el.textContent       = `# ${room.name}`;
+  el.dataset.roomId    = room.id;
+  el.className         = 'room-item';
+  el.onclick           = () => joinRoom(room);
+  roomListEl.appendChild(el);
+}
+```
+
+**Step 5 — Group messages and typing indicator**
+
+```js
+// ── Send button handler — routes to DM or group depending on currentTarget ───
+document.getElementById('send-btn').onclick = sendCurrentMessage;
+msgInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendCurrentMessage();
+});
+
+function sendCurrentMessage() {
+  const text = msgInput.value.trim();
+  if (!text || !currentTarget) return;
+  msgInput.value = '';
+
+  if (currentTarget.type === 'dm') {
+    sendDM(text);
+  } else {
+    sendGroupMessage(text);
+  }
+  stopTyping();  // stop typing indicator when message is sent
+}
+
+// ── Send a group message ──────────────────────────────────────────────────────
+function sendGroupMessage(text) {
+  socket.emit('chat:group', { roomId: currentTarget.roomId, text });
+}
+
+// ── Receive a group message ───────────────────────────────────────────────────
+socket.on('chat:group', (msg) => {
+  if (currentTarget?.roomId === msg.roomId) renderMessage(msg);
+  else notifyUnread(msg.roomId);
+});
+
+// ── Typing indicator ──────────────────────────────────────────────────────────
+msgInput.addEventListener('input', () => {
+  if (!currentTarget) return;
+
+  // Tell the server "I'm typing"
+  emitTyping(true);
+
+  // After 1.5s of no input, tell server "I stopped typing"
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(() => stopTyping(), 1500);
+});
+
+function emitTyping(isTyping) {
+  if (currentTarget.type === 'dm') {
+    socket.emit('user:typing', { to: currentTarget.socketId, isTyping });
+  } else {
+    socket.emit('user:typing', { roomId: currentTarget.roomId, isTyping });
+  }
+}
+
+function stopTyping() {
+  clearTimeout(typingTimer);
+  emitTyping(false);
+}
+
+// ── Display typing indicator received from another user ───────────────────────
+const activeTypers = new Set();
+
+socket.on('user:typing', ({ user, isTyping, roomId, to }) => {
+  // Only show for the currently open conversation
+  const isCurrentConvo =
+    (currentTarget?.type === 'dm'   && to === mySocketId) ||
+    (currentTarget?.type === 'room' && roomId === currentTarget.roomId);
+
+  if (!isCurrentConvo) return;
+
+  if (isTyping) {
+    activeTypers.add(user.username);
+  } else {
+    activeTypers.delete(user.username);
+  }
+
+  // Update the typing label
+  if (activeTypers.size === 0) {
+    typingEl.textContent = '';
+  } else {
+    const names = Array.from(activeTypers).join(', ');
+    typingEl.textContent = `${names} ${activeTypers.size === 1 ? 'is' : 'are'} typing...`;
+  }
+});
+```
+
+**Step 6 — File sending (small and large)**
+
+```js
+// ── Attach button opens file picker ──────────────────────────────────────────
+document.getElementById('attach-btn').onclick = () => {
+  document.getElementById('file-input').click();
+};
+
+document.getElementById('file-input').onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file || !currentTarget) return;
+  e.target.value = '';  // reset so same file can be re-selected
+
+  if (file.size > 1 * 1024 * 1024) {
+    await sendLargeFile(file);   // chunked path
+  } else {
+    await sendSmallFile(file);   // single-emit path
   }
 };
 
-module.exports = connectDB;
-```
+// ── Small file sender ─────────────────────────────────────────────────────────
+async function sendSmallFile(file) {
+  const base64 = await fileToBase64(file);
 
----
-
-## 4. Socket.io Setup with Authentication
-
-**File**: `src/config/socketio.js`
-
-```js
-const { Server } = require("socket.io");
-const jwt = require("jsonwebtoken");
-const User = require("../models/User.model");
-const handleDirectMessages = require("../socket/directMessages");
-const handleGroupMessages = require("../socket/groupMessages");
-
-function setupSocketIO(server) {
-  const io = new Server(server, {
-    cors: { origin: "http://localhost:5173", credentials: true }
-  });
-
-  // In-memory mapping: userId → socketId
-  const activeUsers = new Map();
-
-  // ============================================
-  // AUTHENTICATION MIDDLEWARE
-  // ============================================
-  // Runs before connection event
-  // Verifies JWT and attaches user info to socket
-  
-  io.use(async (socket, next) => {
-    try {
-      // Token sent from client: io(url, { auth: { token: "..." } })
-      const token = socket.handshake.auth.token;
-      
-      if (!token) {
-        return next(new Error("No token provided"));
-      }
-
-      // Verify JWT
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      // decoded = { id: "user123", email: "...", iat: ..., exp: ... }
-      
-      const user = await User.findById(decoded.id);
-      if (!user) {
-        return next(new Error("User not found"));
-      }
-
-      // Attach to socket (available in all event handlers)
-      socket.userId = user._id.toString();
-      socket.username = user.username;
-      
-      next();  // Allow connection
-      
-    } catch (error) {
-      next(new Error("Authentication failed"));
-    }
-  });
-
-  // ============================================
-  // CONNECTION EVENT
-  // ============================================
-  // Fires when client successfully connects
-  
-  io.on("connection", async (socket) => {
-    console.log(`✓ ${socket.username} connected (${socket.id})`);
-
-    // Store mapping: userId → socketId
-    activeUsers.set(socket.userId, socket.id);
-
-    // Update database
-    await User.findByIdAndUpdate(socket.userId, {
-      isOnline: true,
-      socketId: socket.id
-    });
-
-    // Notify all clients
-    io.emit("user_online", {
-      userId: socket.userId,
-      username: socket.username
-    });
-
-    // Initialize event handlers
-    handleDirectMessages(io, socket, activeUsers);
-    handleGroupMessages(io, socket);
-
-    // ============================================
-    // DISCONNECT EVENT
-    // ============================================
-    
-    socket.on("disconnect", async () => {
-      console.log(`✗ ${socket.username} disconnected`);
-
-      activeUsers.delete(socket.userId);
-
-      await User.findByIdAndUpdate(socket.userId, {
-        isOnline: false,
-        lastSeen: new Date(),
-        socketId: null
-      });
-
-      io.emit("user_offline", { userId: socket.userId });
-    });
-  });
-
-  io.activeUsers = activeUsers;
-  return io;
-}
-
-module.exports = setupSocketIO;
-```
-
----
-
-## 5. Direct Message Handler
-
-**File**: `src/socket/directMessages.js`
-
-```js
-const Message = require("../models/Message.model");
-const Conversation = require("../models/Conversation.model");
-const User = require("../models/User.model");
-
-function handleDirectMessages(io, socket, activeUsers) {
-  
-  // ============================================
-  // SEND DIRECT MESSAGE
-  // ============================================
-  // Triggered: User types message and clicks send
-  // Client: socket.emit("send_direct_message", { recipientId, content }, callback)
-  
-  socket.on("send_direct_message", async (data, callback) => {
-    try {
-      const { recipientId, content, file } = data;
-      // recipientId: Selected from UI contact list
-      // content: Text from input field
-      // file: Optional, from upload (see file handler section)
-      
-      const senderId = socket.userId;  // From authentication middleware
-      
-      // Find or create conversation
-      let conversation = await Conversation.findOne({
-        type: "direct",
-        participants: { $all: [senderId, recipientId], $size: 2 }
-      });
-
-      if (!conversation) {
-        conversation = await Conversation.create({
-          type: "direct",
-          participants: [senderId, recipientId]
-        });
-      }
-
-      // Save message to database
-      const message = await Message.create({
-        conversationId: conversation._id,
-        sender: senderId,
-        content: content || "",
-        messageType: file ? file.messageType : "text",
-        file: file,
-        status: "sent"
-      });
-
-      // Populate sender info (username, avatar)
-      await message.populate("sender", "username avatar");
-
-      // Update conversation last message (for UI preview)
-      conversation.lastMessage = {
-        content: content || "File",
-        sender: senderId,
-        timestamp: message.createdAt,
-        messageType: message.messageType
-      };
-      await conversation.save();
-
-      // Try to deliver if recipient online
-      const recipientSocketId = activeUsers.get(recipientId);
-      // activeUsers: Map<userId, socketId> from socketio.js
-      
-      if (recipientSocketId) {
-        // Recipient online - send immediately
-        io.to(recipientSocketId).emit("new_message", {
-          conversationId: conversation._id,
-          message: message
-        });
-        
-        message.status = "delivered";
-        await message.save();
-      }
-      // If offline, stays "sent" - delivered when they connect
-
-      // Acknowledge sender
-      callback({
-        success: true,
-        message: message,
-        status: message.status
-      });
-
-    } catch (error) {
-      console.error("Error in send_direct_message:", error);
-      callback({ success: false, error: error.message });
-    }
-  });
-
-  // ============================================
-  // MARK AS READ
-  // ============================================
-  // Triggered: User opens chat or scrolls to message
-  // Client: socket.emit("mark_as_read", { messageId })
-  
-  socket.on("mark_as_read", async ({ messageId }, callback) => {
-    try {
-      const message = await Message.findById(messageId);
-      if (!message) {
-        return callback({ success: false, error: "Message not found" });
-      }
-
-      // Check if already read
-      const alreadyRead = message.readBy.some(
-        r => r.user.toString() === socket.userId
-      );
-
-      if (!alreadyRead) {
-        message.readBy.push({
-          user: socket.userId,
-          readAt: new Date()
-        });
-        message.status = "read";
-        await message.save();
-
-        // Notify sender
-        const sender = await User.findById(message.sender);
-        if (sender && sender.isOnline && sender.socketId) {
-          io.to(sender.socketId).emit("message_read", {
-            messageId: message._id,
-            conversationId: message.conversationId,
-            readBy: socket.userId,
-            readAt: new Date()
-          });
-        }
-      }
-
-      callback({ success: true });
-
-    } catch (error) {
-      callback({ success: false, error: error.message });
-    }
+  socket.emit('file:send', {
+    name: file.name,
+    type: file.type,
+    size: file.size,
+    data: base64,
+    ...(currentTarget.type === 'dm'
+      ? { to: currentTarget.socketId }
+      : { roomId: currentTarget.roomId })
   });
 }
 
-module.exports = handleDirectMessages;
-```
-
----
-
-## 6. Group Message Handler
-
-**File**: `src/socket/groupMessages.js`
-
-```js
-const Message = require("../models/Message.model");
-const Conversation = require("../models/Conversation.model");
-
-function handleGroupMessages(io, socket) {
-  
-  // ============================================
-  // JOIN GROUP
-  // ============================================
-  // Triggered: User clicks on group in group list
-  // Client: socket.emit("join_group", conversationId, callback)
-  
-  socket.on("join_group", async (conversationId, callback) => {
-    try {
-      // conversationId: Group's unique ID from database
-      // Passed from UI when user clicks group card
-      
-      // Verify user is a participant
-      const conversation = await Conversation.findOne({
-        _id: conversationId,
-        type: "group",
-        participants: socket.userId  // Check membership
-      });
-
-      if (!conversation) {
-        return callback({ success: false, error: "Not a member" });
-      }
-
-      // Join Socket.io room (room name = conversationId)
-      socket.join(conversationId);
-      // Now this socket receives all messages to this room
-
-      // Notify others in group
-      socket.to(conversationId).emit("user_joined_group", {
-        userId: socket.userId,
-        username: socket.username,
-        conversationId
-      });
-
-      callback({ success: true });
-
-    } catch (error) {
-      callback({ success: false, error: error.message });
-    }
-  });
-
-  // ============================================
-  // LEAVE GROUP
-  // ============================================
-  // Triggered: User closes group chat or navigates away
-  // Client: socket.emit("leave_group", conversationId)
-  
-  socket.on("leave_group", (conversationId) => {
-    socket.leave(conversationId);
-    
-    socket.to(conversationId).emit("user_left_group", {
-      userId: socket.userId,
-      username: socket.username,
-      conversationId
-    });
-  });
-
-  // ============================================
-  // SEND GROUP MESSAGE
-  // ============================================
-  // Triggered: User types and sends in group chat
-  // Client: socket.emit("send_group_message", { conversationId, content }, callback)
-  
-  socket.on("send_group_message", async (data, callback) => {
-    try {
-      const { conversationId, content, file } = data;
-
-      // Verify membership
-      const conversation = await Conversation.findOne({
-        _id: conversationId,
-        participants: socket.userId
-      });
-
-      if (!conversation) {
-        return callback({ success: false, error: "Not a member" });
-      }
-
-      // Save message
-      const message = await Message.create({
-        conversationId,
-        sender: socket.userId,
-        content: content || "",
-        messageType: file ? file.messageType : "text",
-        file,
-        status: "sent"
-      });
-
-      await message.populate("sender", "username avatar");
-
-      // Update conversation
-      conversation.lastMessage = {
-        content: content || "File",
-        sender: socket.userId,
-        timestamp: message.createdAt,
-        messageType: message.messageType
-      };
-      await conversation.save();
-
-      // Broadcast to ALL members (including sender)
-      io.to(conversationId).emit("new_group_message", {
-        conversationId,
-        message
-      });
-
-      callback({ success: true, message });
-
-    } catch (error) {
-      callback({ success: false, error: error.message });
-    }
-  });
-
-  // ============================================
-  // TYPING INDICATOR
-  // ============================================
-  
-  socket.on("typing_start", ({ conversationId }) => {
-    socket.to(conversationId).emit("user_typing", {
-      userId: socket.userId,
-      username: socket.username,
-      conversationId
-    });
-  });
-
-  socket.on("typing_stop", ({ conversationId }) => {
-    socket.to(conversationId).emit("user_stopped_typing", {
-      userId: socket.userId,
-      conversationId
-    });
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
   });
 }
 
-module.exports = handleGroupMessages;
-```
+// ── Large file sender (chunked) ───────────────────────────────────────────────
+const CHUNK_SIZE = 64 * 1024;
 
----
+async function sendLargeFile(file) {
+  const transferId  = Math.random().toString(36).slice(2);
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  const buffer      = await file.arrayBuffer();
+  const target      = currentTarget.type === 'dm'
+    ? { to: currentTarget.socketId }
+    : { roomId: currentTarget.roomId };
 
-## 7. File Upload Handler
+  // Announce the transfer
+  socket.emit('file:chunk-start', { transferId, name: file.name, type: file.type, size: file.size, totalChunks, ...target });
 
-**File**: `src/routes/upload.routes.js`
+  // Show progress bar in UI
+  const progressId = showProgressBar(file.name, transferId);
 
-```js
-const express = require("express");
-const multer = require("multer");
-const path = require("path");
-const authMiddleware = require("../middlewares/auth.middleware");
+  for (let i = 0; i < totalChunks; i++) {
+    const slice  = buffer.slice(i * CHUNK_SIZE, Math.min((i + 1) * CHUNK_SIZE, file.size));
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(slice)));
 
-const router = express.Router();
+    socket.emit('file:chunk', { transferId, index: i, data: base64, ...target });
 
-// Configure multer
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => {
-    const uniqueName = `${Date.now()}-${file.originalname}`;
-    cb(null, uniqueName);
+    updateProgressBar(progressId, Math.round(((i + 1) / totalChunks) * 100));
+    if (i % 10 === 0) await new Promise(r => setTimeout(r, 0));  // keep UI live
   }
-});
 
-const upload = multer({
-  storage,
-  limits: { fileSize: 50 * 1024 * 1024 },  // 50MB
-  fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|gif|pdf|doc|docx|mp4|mp3/;
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (allowed.test(ext.substring(1))) {
-      cb(null, true);
-    } else {
-      cb(new Error("Invalid file type"));
-    }
-  }
-});
-
-// Upload endpoint
-// POST /api/upload
-// Headers: Authorization: Bearer <token>
-// Body: FormData with "file" field
-router.post("/", authMiddleware, upload.single("file"), (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, error: "No file" });
-    }
-
-    const fileUrl = `/uploads/${req.file.filename}`;
-    
-    // Determine message type
-    let messageType = "file";
-    if (req.file.mimetype.startsWith("image/")) messageType = "image";
-    else if (req.file.mimetype.startsWith("video/")) messageType = "video";
-    else if (req.file.mimetype.startsWith("audio/")) messageType = "audio";
-
-    res.json({
-      success: true,
-      file: {
-        url: fileUrl,
-        filename: req.file.originalname,
-        size: req.file.size,
-        mimetype: req.file.mimetype,
-        messageType
-      }
-    });
-
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-module.exports = router;
-```
-
-**File**: `src/middlewares/auth.middleware.js`
-
-```js
-const jwt = require("jsonwebtoken");
-const User = require("../models/User.model");
-
-async function authMiddleware(req, res, next) {
-  try {
-    // Extract token from: Authorization: Bearer <token>
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ success: false, error: "No token" });
-    }
-
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    const user = await User.findById(decoded.id);
-    if (!user) {
-      return res.status(401).json({ success: false, error: "User not found" });
-    }
-
-    req.user = user;  // Attach to request
-    next();
-
-  } catch (error) {
-    return res.status(401).json({ success: false, error: "Invalid token" });
-  }
+  socket.emit('file:chunk-end', { transferId, ...target });
+  removeProgressBar(progressId);
 }
 
-module.exports = authMiddleware;
-```
+// ── Receive a small file ──────────────────────────────────────────────────────
+socket.on('file:receive', (fileMsg) => {
+  const bytes = Uint8Array.from(atob(fileMsg.data), c => c.charCodeAt(0));
+  const blob  = new Blob([bytes], { type: fileMsg.type });
+  const url   = URL.createObjectURL(blob);
+  renderFileMessage(fileMsg, url);
+});
 
-### Sending File Message
+// ── Receive a large file (reassemble) ────────────────────────────────────────
+const incomingTransfers = new Map();
 
-**Client flow**:
-
-```js
-// 1. User selects file
-async function sendFileMessage(recipientId, file) {
-  // Upload via HTTP
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const response = await fetch("http://localhost:3000/api/upload", {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${token}` },
-    body: formData
+socket.on('file:chunk-start', (meta) => {
+  incomingTransfers.set(meta.transferId, {
+    meta,
+    chunks: new Array(meta.totalChunks),
+    received: 0
   });
+  showProgressBar(meta.name, meta.transferId);
+});
 
-  const { file: fileData } = await response.json();
-  // fileData = { url, filename, size, mimetype, messageType }
+socket.on('file:chunk', ({ transferId, index, data }) => {
+  const t = incomingTransfers.get(transferId);
+  if (!t) return;
+  t.chunks[index] = data;
+  t.received++;
+  updateProgressBar(transferId, Math.round((t.received / t.meta.totalChunks) * 100));
+});
 
-  // Send message via Socket.io
-  socket.emit("send_direct_message", {
-    recipientId,
-    content: "Sent a file",
-    file: fileData
-  }, (response) => {
-    if (response.success) {
-      console.log("✓ File message sent");
-    }
-  });
-}
+socket.on('file:chunk-end', ({ transferId }) => {
+  const t = incomingTransfers.get(transferId);
+  if (!t) return;
+
+  const byteArrays = t.chunks.map(b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+  const total      = byteArrays.reduce((s, a) => s + a.length, 0);
+  const merged     = new Uint8Array(total);
+  let   off        = 0;
+  for (const arr of byteArrays) { merged.set(arr, off); off += arr.length; }
+
+  const blob = new Blob([merged], { type: t.meta.type });
+  const url  = URL.createObjectURL(blob);
+  renderFileMessage(t.meta, url);
+  removeProgressBar(transferId);
+  incomingTransfers.delete(transferId);
+});
 ```
 
-**Displaying files**:
+**Step 7 — Render helpers**
 
 ```js
-socket.on("new_message", ({ message }) => {
-  if (message.messageType === "image") {
-    display(`<img src="${message.file.url}" />`);
-  } else if (message.messageType === "text") {
-    display(message.content);
-  } else {
-    display(`<a href="${message.file.url}">${message.file.filename}</a>`);
-  }
-});
-```
-
----
-
-## 8. Client Implementation
-
-This section shows the core Socket.io client setup and message handling patterns. As a backend developer, you need to understand how the frontend connects and interacts with your Socket.io server.
-
-### 8.1 Initial Setup & Connection
-
-**Installation**:
-```bash
-npm install socket.io-client
-```
-
-**Basic connection with authentication**:
-
-```js
-import { io } from "socket.io-client";
-
-// ============================================
-// CONNECTION SETUP
-// ============================================
-
-// Get JWT token (stored after login)
-const token = localStorage.getItem("token");
-
-// Connect to Socket.io server
-// The token is sent in handshake and verified by io.use() middleware on server
-const socket = io("http://localhost:3000", {
-  auth: {
-    token: token
-  },
-  
-  // Optional: reconnection settings
-  reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 1000
-});
-
-// ============================================
-// CONNECTION EVENTS
-// ============================================
-
-socket.on("connect", () => {
-  console.log("✓ Connected to server");
-  console.log("Socket ID:", socket.id);
-  // socket.id is auto-generated by server (e.g., "abc123xyz")
-  // This is NOT the same as userId - it's the socket connection ID
-});
-
-socket.on("disconnect", (reason) => {
-  console.log("✗ Disconnected:", reason);
-  // Reasons: "io server disconnect", "io client disconnect", "ping timeout", etc.
-});
-
-socket.on("connect_error", (error) => {
-  console.error("Connection failed:", error.message);
-  // This fires if JWT token is invalid or missing
-  // Typically redirect to login page here
-  window.location.href = "/login";
-});
-
-// ============================================
-// PRESENCE EVENTS
-// ============================================
-
-// Server broadcasts when someone comes online
-socket.on("user_online", ({ userId, username }) => {
-  console.log(`${username} is now online`);
-  // Update UI: show green dot, update contact list, etc.
-  updateUserStatus(userId, "online");
-});
-
-// Server broadcasts when someone goes offline
-socket.on("user_offline", ({ userId }) => {
-  console.log(`User ${userId} went offline`);
-  // Update UI: show gray dot, display last seen time
-  updateUserStatus(userId, "offline");
-});
-```
-
----
-
-### 8.2 Sending Direct Messages
-
-```js
-// ============================================
-// SEND MESSAGE FUNCTION
-// ============================================
-// Called when user types message and clicks send button
-
-function sendDirectMessage(recipientId, messageText) {
-  // recipientId: User ID of the person to send to (e.g., "user_bob123")
-  //              Comes from UI when user selects contact from list
-  // messageText: Content from input field
-  
-  socket.emit("send_direct_message", {
-    recipientId: recipientId,
-    content: messageText
-  }, (response) => {
-    // This callback receives server's response
-    // Server calls: callback({ success: true, message: {...}, status: "delivered" })
-    
-    if (response.success) {
-      console.log("✓ Message sent successfully");
-      console.log("Status:", response.status);  // "sent" or "delivered"
-      
-      // Add message to UI with status indicator
-      displayMyMessage(response.message, response.status);
-      
-      // Clear input field
-      document.getElementById("message-input").value = "";
-      
-    } else {
-      console.error("✗ Failed to send:", response.error);
-      // Show error notification to user
-      showError("Failed to send message: " + response.error);
-    }
-  });
+// ── Render a text message ─────────────────────────────────────────────────────
+function renderMessage(msg) {
+  const isMine = msg.from.socketId === mySocketId;
+  const el     = document.createElement('div');
+  el.className = `msg ${isMine ? 'me' : ''}`;
+  el.innerHTML = `<b>${isMine ? 'Me' : msg.from.username}</b>: ${escapeHtml(msg.text)}
+                  <small style="color:#aaa"> ${formatTime(msg.timestamp)}</small>`;
+  messagesEl.appendChild(el);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-// ============================================
-// EXAMPLE USAGE
-// ============================================
-
-// User clicks send button
-document.getElementById("send-btn").addEventListener("click", () => {
-  const input = document.getElementById("message-input");
-  const messageText = input.value.trim();
-  
-  if (!messageText) return;  // Don't send empty messages
-  
-  // Get current chat recipient (stored when user opened chat)
-  const recipientId = getCurrentRecipientId();
-  
-  sendDirectMessage(recipientId, messageText);
-});
-
-// Send on Enter key
-document.getElementById("message-input").addEventListener("keypress", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    document.getElementById("send-btn").click();
-  }
-});
-```
-
----
-
-### 8.3 Receiving Direct Messages
-
-```js
-// ============================================
-// RECEIVE MESSAGE EVENT
-// ============================================
-// Server emits this when someone sends you a message
-// Server code: io.to(recipientSocketId).emit("new_message", { conversationId, message })
-
-socket.on("new_message", ({ conversationId, message }) => {
-  // conversationId: ID of the conversation this message belongs to
-  // message: {
-  //   _id: "msg123",
-  //   sender: { _id: "user_alice", username: "Alice", avatar: "/avatars/alice.jpg" },
-  //   content: "Hello!",
-  //   messageType: "text",
-  //   status: "delivered",
-  //   createdAt: "2024-01-15T10:30:00Z"
-  // }
-  
-  console.log("📨 New message from:", message.sender.username);
-  console.log("Content:", message.content);
-  
-  // Check if this message is for the currently open conversation
-  const currentConversationId = getCurrentConversationId();
-  
-  if (conversationId === currentConversationId) {
-    // Message is for the chat currently being viewed
-    displayReceivedMessage(message);
-    
-    // Auto-mark as read since user is viewing it
-    socket.emit("mark_as_read", { 
-      messageId: message._id 
-    }, (response) => {
-      if (response.success) {
-        console.log("✓ Marked as read");
-      }
-    });
-    
-  } else {
-    // Message from another conversation (not currently viewing)
-    
-    // Show notification
-    showNotification(
-      `New message from ${message.sender.username}`,
-      message.content
-    );
-    
-    // Update unread badge on conversation list
-    incrementUnreadCount(conversationId);
-    
-    // Play notification sound
-    playNotificationSound();
-  }
-});
-```
-
----
-
-### 8.4 Marking Messages as Read
-
-```js
-// ============================================
-// MARK AS READ
-// ============================================
-// Called when user views a message
-
-function markMessageAsRead(messageId) {
-  // messageId: ID of the message to mark as read
-  //           Stored in DOM when message was displayed
-  
-  socket.emit("mark_as_read", { 
-    messageId: messageId 
-  }, (response) => {
-    if (response.success) {
-      console.log("✓ Message marked as read");
-      // No UI update needed - happens via "message_read" event
-    } else {
-      console.error("✗ Failed to mark as read:", response.error);
-    }
-  });
+// ── Render a file message ─────────────────────────────────────────────────────
+function renderFileMessage(meta, url) {
+  const el   = document.createElement('div');
+  el.className = 'msg';
+  const link = document.createElement('a');
+  link.href  = url;
+  link.download = meta.name;
+  link.textContent = `📎 ${meta.name} (${formatBytes(meta.size)})`;
+  el.appendChild(link);
+  messagesEl.appendChild(el);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-// ============================================
-// AUTO-MARK MESSAGES AS READ
-// ============================================
-// When user scrolls message into view
-
-const observer = new IntersectionObserver((entries) => {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      // Message is visible on screen
-      const messageElement = entry.target;
-      const messageId = messageElement.dataset.messageId;
-      const isRead = messageElement.dataset.read === "true";
-      
-      if (!isRead) {
-        markMessageAsRead(messageId);
-        messageElement.dataset.read = "true";
-      }
-    }
-  });
-}, { threshold: 0.5 });  // Trigger when 50% visible
-
-// Observe all unread messages
-document.querySelectorAll(".message[data-read='false']").forEach(msg => {
-  observer.observe(msg);
-});
-```
-
----
-
-### 8.5 Receiving Read Receipts
-
-```js
-// ============================================
-// READ RECEIPT EVENT
-// ============================================
-// Server emits this when someone reads your message
-// Server code: io.to(senderSocketId).emit("message_read", { messageId, readBy, readAt })
-
-socket.on("message_read", ({ messageId, readBy, readAt }) => {
-  // messageId: ID of your message that was read
-  // readBy: User ID who read it
-  // readAt: Timestamp when they read it
-  
-  console.log(`✓✓ Message ${messageId} was read by ${readBy}`);
-  
-  // Find the message element in DOM
-  const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-  
-  if (messageElement) {
-    // Update status icon
-    const statusIcon = messageElement.querySelector(".status-icon");
-    
-    // Change from single checkmark (✓) to double blue checkmark (✓✓)
-    statusIcon.textContent = "✓✓";
-    statusIcon.classList.remove("delivered");
-    statusIcon.classList.add("read");
-    
-    // Update timestamp to show when read
-    const timestamp = messageElement.querySelector(".timestamp");
-    timestamp.title = `Read at ${new Date(readAt).toLocaleString()}`;
-  }
-});
-```
-
----
-
-### 8.6 Group Chat Implementation
-
-```js
-// ============================================
-// JOIN GROUP
-// ============================================
-// Called when user clicks on a group in group list
-
-function joinGroup(conversationId) {
-  // conversationId: Group's unique ID from database
-  //                 Retrieved from API when loading group list
-  
-  socket.emit("join_group", conversationId, (response) => {
-    if (response.success) {
-      console.log("✓ Joined group:", conversationId);
-      
-      // Load message history via HTTP API
-      loadGroupMessages(conversationId);
-      
-      // Update UI to show group chat window
-      showGroupChat(conversationId);
-      
-    } else {
-      console.error("✗ Failed to join:", response.error);
-      showError("Cannot join group: " + response.error);
-    }
-  });
+// ── Render a system message (user joined, etc.) ───────────────────────────────
+function appendSystemMessage(text) {
+  const el = document.createElement('div');
+  el.className = 'msg system';
+  el.textContent = text;
+  messagesEl.appendChild(el);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-// ============================================
-// SEND GROUP MESSAGE
-// ============================================
-
-function sendGroupMessage(conversationId, messageText) {
-  socket.emit("send_group_message", {
-    conversationId: conversationId,
-    content: messageText
-  }, (response) => {
-    if (response.success) {
-      console.log("✓ Group message sent");
-      // Message will appear via "new_group_message" event
-    } else {
-      console.error("✗ Failed:", response.error);
-      showError("Failed to send: " + response.error);
-    }
-  });
+// ── Progress bar helpers ──────────────────────────────────────────────────────
+function showProgressBar(name, id) {
+  const el  = document.createElement('div');
+  el.id     = `progress-${id}`;
+  el.innerHTML = `<small>${escapeHtml(name)}</small><progress value="0" max="100"></progress>`;
+  messagesEl.appendChild(el);
+  return id;
 }
 
-// ============================================
-// RECEIVE GROUP MESSAGES
-// ============================================
-
-socket.on("new_group_message", ({ conversationId, message }) => {
-  // Check if this is the currently open group
-  if (conversationId === getCurrentConversationId()) {
-    
-    // Check if message is from current user (to avoid duplicate display)
-    const myUserId = getCurrentUserId();
-    const isMine = message.sender._id === myUserId;
-    
-    // Display message (will show on right if mine, left if others)
-    displayGroupMessage(message, isMine);
-    
-    // Mark as read if not from me
-    if (!isMine) {
-      socket.emit("mark_as_read", { messageId: message._id });
-    }
-    
-  } else {
-    // Message from another group
-    showNotification(`New message in ${getGroupName(conversationId)}`);
-    incrementUnreadCount(conversationId);
-  }
-});
-
-// ============================================
-// GROUP MEMBER EVENTS
-// ============================================
-
-socket.on("user_joined_group", ({ userId, username, conversationId }) => {
-  if (conversationId === getCurrentConversationId()) {
-    // Show system message
-    displaySystemMessage(`${username} joined the chat`);
-  }
-});
-
-socket.on("user_left_group", ({ userId, username, conversationId }) => {
-  if (conversationId === getCurrentConversationId()) {
-    displaySystemMessage(`${username} left the chat`);
-  }
-});
-
-// ============================================
-// LEAVE GROUP
-// ============================================
-// Called when user closes group chat or navigates away
-
-function leaveGroup(conversationId) {
-  socket.emit("leave_group", conversationId);
-  console.log("Left group:", conversationId);
+function updateProgressBar(id, pct) {
+  const el = document.getElementById(`progress-${id}`);
+  if (el) el.querySelector('progress').value = pct;
 }
 
-// Auto-leave when navigating away
-window.addEventListener("beforeunload", () => {
-  const currentGroup = getCurrentConversationId();
-  if (currentGroup) {
-    leaveGroup(currentGroup);
-  }
-});
-```
-
----
-
-### 8.7 Typing Indicators
-
-```js
-// ============================================
-// SEND TYPING INDICATOR
-// ============================================
-
-const messageInput = document.getElementById("message-input");
-let typingTimeout;
-
-messageInput.addEventListener("input", () => {
-  const conversationId = getCurrentConversationId();
-  
-  // Emit typing start
-  socket.emit("typing_start", { 
-    conversationId: conversationId 
-  });
-  
-  // Clear previous timeout
-  clearTimeout(typingTimeout);
-  
-  // After 1 second of no typing, emit typing stop
-  typingTimeout = setTimeout(() => {
-    socket.emit("typing_stop", { 
-      conversationId: conversationId 
-    });
-  }, 1000);
-});
-
-// Also emit stop when user sends message
-function sendMessage() {
-  // ... send message code ...
-  
-  // Stop typing indicator
-  clearTimeout(typingTimeout);
-  socket.emit("typing_stop", { 
-    conversationId: getCurrentConversationId() 
-  });
+function removeProgressBar(id) {
+  document.getElementById(`progress-${id}`)?.remove();
 }
 
-// ============================================
-// RECEIVE TYPING INDICATORS
-// ============================================
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function notifyUnread(id) {
+  const el = document.querySelector(`[data-id="${id}"], [data-room-id="${id}"]`);
+  if (el) el.style.fontWeight = 'bold';  // bold = unread indicator
+}
 
-// Track who is currently typing (for groups with multiple people)
-const currentlyTyping = new Set();
+function escapeHtml(str) {
+  // Prevent XSS — never render user input as raw HTML
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
-socket.on("user_typing", ({ userId, username, conversationId }) => {
-  if (conversationId === getCurrentConversationId()) {
-    currentlyTyping.add(username);
-    updateTypingIndicator();
-  }
-});
+function formatTime(ts) {
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
-socket.on("user_stopped_typing", ({ userId, conversationId }) => {
-  if (conversationId === getCurrentConversationId()) {
-    // Find and remove this user from typing set
-    const user = findUserById(userId);
-    if (user) {
-      currentlyTyping.delete(user.username);
-      updateTypingIndicator();
-    }
-  }
-});
-
-function updateTypingIndicator() {
-  const indicator = document.getElementById("typing-indicator");
-  
-  if (currentlyTyping.size === 0) {
-    indicator.textContent = "";
-    indicator.style.display = "none";
-  } else if (currentlyTyping.size === 1) {
-    const [username] = currentlyTyping;
-    indicator.textContent = `${username} is typing...`;
-    indicator.style.display = "block";
-  } else if (currentlyTyping.size === 2) {
-    const [user1, user2] = currentlyTyping;
-    indicator.textContent = `${user1} and ${user2} are typing...`;
-    indicator.style.display = "block";
-  } else {
-    indicator.textContent = "Multiple people are typing...";
-    indicator.style.display = "block";
-  }
+function formatBytes(bytes) {
+  if (bytes < 1024)        return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 ```
 
 ---
 
-### 8.8 File Upload & Send
+### Step 8 — The Full Execution Order (Putting It All Together)
+
+> **Mental model:** Every feature above defined ingredients. This is the full recipe — what fires when, in what order, and which branches each scenario takes. If you're confused about "who sends what and when", start here.
 
 ```js
-// ============================================
-// FILE UPLOAD FLOW
-// ============================================
+// ═══════════════════════════════════════════════════════════════════════════════
+//  EXECUTION ORDER — client.html
+//  Read top to bottom. Comments mark WHEN each block runs.
+// ═══════════════════════════════════════════════════════════════════════════════
 
-async function sendFileMessage(recipientId, file) {
-  // file: File object from <input type="file">
-  
-  try {
-    // STEP 1: Upload file via HTTP
-    const formData = new FormData();
-    formData.append("file", file);
 
-    const token = localStorage.getItem("token");
-    
-    const uploadResponse = await fetch("http://localhost:3000/api/upload", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`
-      },
-      body: formData
-    });
+// ── ON PAGE LOAD ──────────────────────────────────────────────────────────────
+//    Socket connects. No messages yet. All users go through this.
 
-    const uploadData = await uploadResponse.json();
+const socket = io('http://localhost:3000');
 
-    if (!uploadData.success) {
-      throw new Error(uploadData.error);
-    }
+socket.on('connect', () => {
+  mySocketId = socket.id;
+  myUsername = prompt('Enter your username:') || 'User_' + socket.id.slice(0, 4);
 
-    console.log("✓ File uploaded:", uploadData.file.url);
-    
-    // uploadData.file = {
-    //   url: "/uploads/123-image.jpg",
-    //   filename: "image.jpg",
-    //   size: 204800,
-    //   mimetype: "image/jpeg",
-    //   messageType: "image"
-    // }
-
-    // STEP 2: Send message via Socket.io with file reference
-    socket.emit("send_direct_message", {
-      recipientId: recipientId,
-      content: "",  // Optional caption
-      file: uploadData.file  // File metadata from upload
-    }, (response) => {
-      if (response.success) {
-        console.log("✓ File message sent");
-        displayMyMessage(response.message, response.status);
-      } else {
-        console.error("✗ Failed to send:", response.error);
-        showError("Failed to send file message");
-      }
-    });
-
-  } catch (error) {
-    console.error("Error uploading file:", error);
-    showError("Failed to upload file: " + error.message);
-  }
-}
-
-// ============================================
-// FILE INPUT HANDLER
-// ============================================
-
-document.getElementById("file-input").addEventListener("change", (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  
-  const recipientId = getCurrentRecipientId();
-  sendFileMessage(recipientId, file);
-  
-  // Clear input so same file can be selected again
-  e.target.value = "";
+  socket.emit('user:register', { username: myUsername }, (res) => {
+    // ↑ Ack fires immediately when server responds
+    statusEl.textContent = `🟢 ${myUsername}`;
+  });
+  // Server responds with 'state:init' which populates the user + room lists
 });
 
-// ============================================
-// DISPLAY RECEIVED FILE
-// ============================================
-
-socket.on("new_message", ({ message }) => {
-  // Check if message has a file
-  if (message.file) {
-    displayFileMessage(message);
-  } else {
-    displayTextMessage(message);
-  }
+socket.on('state:init', ({ users, rooms }) => {
+  renderUserList(users);   // populate sidebar: user list
+  renderRoomList(rooms);   // populate sidebar: room list
+  // UI is now fully ready. User can click a user or room to start chatting.
 });
 
-function displayFileMessage(message) {
-  const messageDiv = document.createElement("div");
-  messageDiv.className = "message received";
-  
-  let content = `<strong>${message.sender.username}:</strong><br>`;
-  
-  // Display based on file type
-  if (message.messageType === "image") {
-    content += `<img src="${message.file.url}" 
-                     alt="${message.file.filename}" 
-                     style="max-width: 300px; cursor: pointer;" 
-                     onclick="openImageModal('${message.file.url}')" />`;
-  } else if (message.messageType === "video") {
-    content += `<video controls style="max-width: 300px;">
-                  <source src="${message.file.url}" type="${message.file.mimetype}">
-                </video>`;
-  } else if (message.messageType === "audio") {
-    content += `<audio controls>
-                  <source src="${message.file.url}" type="${message.file.mimetype}">
-                </audio>`;
-  } else {
-    // Generic file (PDF, DOC, etc.)
-    const fileSize = formatFileSize(message.file.size);
-    content += `<a href="${message.file.url}" 
-                   download="${message.file.filename}" 
-                   class="file-download">
-                  📎 ${message.file.filename} (${fileSize})
-                </a>`;
-  }
-  
-  messageDiv.innerHTML = content;
-  document.getElementById("messages").appendChild(messageDiv);
-}
 
-function formatFileSize(bytes) {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-}
+// ══════════════════════════════════════════════════════════════════════════════
+//  FROM HERE, FLOWS DIVERGE BY USER ACTION
+// ══════════════════════════════════════════════════════════════════════════════
+
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │  SCENARIO A: User clicks a name → opens a DM                               │
+// └─────────────────────────────────────────────────────────────────────────────┘
+
+openDM(user);
+// Sets currentTarget = { type: 'dm', socketId: '...', username: '...' }
+// Clears messages area
+
+// User types a message and hits Send:
+sendCurrentMessage();
+//  → currentTarget.type === 'dm', so calls sendDM(text)
+//  → socket.emit('chat:dm', { to: socketId, text })
+//  → Server routes it: socket.to(to).emit() + echo to sender
+//  → Both clients hit socket.on('chat:dm') → renderMessage()
+
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │  SCENARIO B: User creates a new room                                        │
+// └─────────────────────────────────────────────────────────────────────────────┘
+
+// User clicks "+ New Room", enters name:
+socket.emit('room:create', { name }, (res) => {
+  openRoom(res.room);
+  // Sets currentTarget = { type: 'room', roomId: '...', name: '...' }
+});
+// Server: creates room, calls socket.join(roomId), emits 'room:created' to ALL
+// All clients: socket.on('room:created') → appendToRoomList()
+
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │  SCENARIO C: User clicks an existing room → joins it                        │
+// └─────────────────────────────────────────────────────────────────────────────┘
+
+joinRoom(room);
+// → socket.emit('room:join', { roomId })
+// Server: socket.join(roomId), emits 'room:user-joined' to others in room
+// → Ack received: openRoom(room) sets currentTarget
+// → socket.on('room:member-list') updates who's in the room
+
+// User sends a group message:
+sendCurrentMessage();
+//  → currentTarget.type === 'room', so calls sendGroupMessage(text)
+//  → socket.emit('chat:group', { roomId, text })
+//  → Server: io.to(roomId).emit('chat:group', enrichedMsg)
+//  → ALL room members (including sender) hit socket.on('chat:group') → renderMessage()
+
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │  SCENARIO D: User types in the input box → typing indicator fires           │
+// └─────────────────────────────────────────────────────────────────────────────┘
+
+// msgInput 'input' event fires on every keystroke:
+//  → emitTyping(true) — tells server "I'm typing"
+//  → debounce timer reset to 1.5s
+//  → after 1.5s of no input: stopTyping() → emitTyping(false)
+// Server: socket.to(target).emit('user:typing', { user, isTyping })
+// Recipient: socket.on('user:typing') → add/remove from activeTypers set → update label
+
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │  SCENARIO E: User attaches a file                                           │
+// └─────────────────────────────────────────────────────────────────────────────┘
+
+// User clicks 📎 → file picker opens → file selected → onchange fires
+// BRANCH: file.size <= 1MB
+//  → sendSmallFile(file)
+//  → fileToBase64() → one socket.emit('file:send', { data: base64, ... })
+//  → Server: forwards to target
+//  → Recipient: socket.on('file:receive') → decode Base64 → Blob → URL → renderFileMessage()
+
+// BRANCH: file.size > 1MB
+//  → sendLargeFile(file)
+//  → socket.emit('file:chunk-start')  ← announces transfer
+//  → for loop: socket.emit('file:chunk') × N  ← sends each 64KB slice
+//  → socket.emit('file:chunk-end')    ← signals completion
+//  → Server: relays each event to target as it arrives (no buffering)
+//  → Recipient:
+//      'file:chunk-start' → create transfer slot in incomingTransfers Map
+//      'file:chunk'       × N → store each chunk at index, update progress bar
+//      'file:chunk-end'   → merge all chunks → Blob → URL → renderFileMessage()
+
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │  SCENARIO F: A user disconnects (tab close / network drop)                  │
+// └─────────────────────────────────────────────────────────────────────────────┘
+
+// Server: socket.on('disconnect') fires automatically
+//  → removes socket from all rooms, emits 'room:user-left' to each
+//  → deletes from users Map, emits 'user:offline' to everyone
+// Other clients:
+//  → socket.on('user:offline') → removeFromUserList(socketId)
+//  → socket.on('room:user-left') → appendSystemMessage() in affected rooms
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  FULL EVENT MAP — Every event name used in this app
+//
+//  CLIENT → SERVER         SERVER → CLIENT
+//  ─────────────────       ─────────────────────────────
+//  user:register           state:init       (snapshot on connect)
+//  chat:dm                 chat:dm          (1-on-1 message)
+//  chat:group              chat:group       (group message)
+//  room:create             room:created     (new room broadcast)
+//  room:join               room:user-joined (member joined notification)
+//  room:leave              room:user-left   (member left notification)
+//  user:typing             room:member-list (room members on join)
+//  file:send               room:deleted     (room removed)
+//  file:chunk-start        user:online      (new user broadcast)
+//  file:chunk              user:offline     (user disconnected)
+//  file:chunk-end          file:receive     (small file delivery)
+//                          file:chunk-start (large file announced)
+//                          file:chunk       (large file piece)
+//                          file:chunk-end   (large file complete)
+//                          user:typing      (typing indicator)
+// ═══════════════════════════════════════════════════════════════════════════════
 ```
 
 ---
 
-### 8.9 Connection State Management
+## Quick Reference — Cheat Sheets
 
-```js
-// ============================================
-// HANDLE RECONNECTION
-// ============================================
-// Socket.io automatically reconnects, but you need to restore state
+### Who Receives the Message?
 
-socket.on("connect", () => {
-  console.log("✓ Connected");
-  
-  // If user was in a group chat, rejoin
-  const currentGroup = getCurrentConversationId();
-  if (currentGroup) {
-    socket.emit("join_group", currentGroup, (response) => {
-      if (response.success) {
-        console.log("✓ Rejoined group after reconnection");
-      }
-    });
-  }
-  
-  // Fetch any messages missed during disconnection
-  fetchMissedMessages();
-});
-
-socket.on("disconnect", (reason) => {
-  console.log("✗ Disconnected:", reason);
-  
-  // Show connection lost indicator
-  showConnectionStatus("disconnected");
-  
-  if (reason === "io server disconnect") {
-    // Server forcefully disconnected (kicked or banned)
-    showError("You were disconnected from the server");
-    window.location.href = "/login";
-  }
-  // For other reasons, Socket.io will auto-reconnect
-});
-
-socket.on("reconnect_attempt", (attemptNumber) => {
-  console.log(`Reconnection attempt ${attemptNumber}`);
-  showConnectionStatus("reconnecting");
-});
-
-socket.on("reconnect_failed", () => {
-  console.error("✗ Reconnection failed");
-  showConnectionStatus("failed");
-  showError("Cannot connect to server. Please refresh the page.");
-});
-
-// ============================================
-// SHOW CONNECTION STATUS TO USER
-// ============================================
-
-function showConnectionStatus(status) {
-  const indicator = document.getElementById("connection-status");
-  
-  switch (status) {
-    case "connected":
-      indicator.textContent = "Connected";
-      indicator.className = "status-connected";
-      break;
-    case "disconnected":
-      indicator.textContent = "Connection lost";
-      indicator.className = "status-disconnected";
-      break;
-    case "reconnecting":
-      indicator.textContent = "Reconnecting...";
-      indicator.className = "status-reconnecting";
-      break;
-    case "failed":
-      indicator.textContent = "Connection failed";
-      indicator.className = "status-failed";
-      break;
-  }
-}
 ```
+  socket.emit(event, data)              →  client sends to SERVER
+  socket.to(socketId).emit(event, data) →  server to ONE specific client
+  socket.broadcast.emit(event, data)    →  server to EVERYONE except sender
+  socket.to(roomId).emit(event, data)   →  server to room, EXCLUDING sender
+  io.to(roomId).emit(event, data)       →  server to room, INCLUDING sender
+  io.emit(event, data)                  →  server to EVERY connected client
+```
+
+### File Size Decision Tree
+
+```
+  User selects file
+        │
+        ▼
+  file.size > 1MB?
+     │         │
+    YES        NO
+     │         │
+     ▼         ▼
+  Chunked    Base64 in
+  Transfer   one emit
+  (loop of   (file:send)
+  file:chunk)
+```
+
+### The 6 Things Every Socket Handler Must Do on Connect
+
+| Step | What it does |
+|---|---|
+| `socket.emit('user:register', ...)` | Give yourself a username on the server |
+| `socket.on('state:init', ...)` | Receive existing users and rooms |
+| `socket.on('user:online/offline', ...)` | Keep user list updated |
+| `socket.on('chat:dm', ...)` | Handle incoming 1-on-1 messages |
+| `socket.on('chat:group', ...)` | Handle incoming group messages |
+| `socket.on('file:receive / chunk-*', ...)` | Handle file deliveries |
+
+---
+
+## Common Errors & Fixes
+
+| Error | Cause | Fix |
+|---|---|---|
+| Messages not reaching recipient | Targeting by `socket.id` which changed after reconnect | Use a stable user ID (not `socket.id`) stored server-side |
+| File chunks arrive out of order | Network reordering | Store by `index` in a pre-sized array — don't assume order |
+| Large file silently dropped | `maxHttpBufferSize` too small | Set `maxHttpBufferSize: 10 * 1024 * 1024` in the server `Server()` config |
+| Typing indicator never clears | `emitTyping(false)` not called on disconnect | Call `stopTyping()` in `socket.on('disconnect')` on client |
+| Room messages received twice | Used `io.to()` and also echoed manually | Use only `io.to()` for group — it already includes the sender |
+| XSS via chat messages | Rendering `msg.text` as raw HTML | Always escape user content with `escapeHtml()` before inserting |
+| Memory leak on large transfers | `incomingTransfers` map never cleaned up | Always call `incomingTransfers.delete(transferId)` after assembly |
+
+---
+
+## Testing Locally
+
+```
+Terminal:     node server.js
+Tab 1:        http://localhost:3000  → enter username "Alice"
+Tab 2:        http://localhost:3000  → enter username "Bob"
+Tab 3:        http://localhost:3000  → enter username "Carol"
+
+Test DM:      Alice clicks Bob in sidebar → types → sends
+Test Group:   Alice clicks "+ New Room" → names it → Bob clicks room name → both chat
+Test File:    Either user clicks 📎 → selects a small image → appears as download link
+              Select a file > 1MB → progress bar appears → reassembled on receive
+```
+
+> **Tip:** Open browser DevTools → Network tab → filter by `WS` to see every Socket.IO frame in real time. Each message appears as a row — click it to inspect the payload.
