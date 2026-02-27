@@ -1,7 +1,4 @@
 # WebSocket: Real-Time Chat
-### A Beginner-Friendly Technical Reference — 1-on-1, Group Chats & File Sharing
-
----
 
 ## What Is WebSocket?
 
@@ -16,7 +13,6 @@
 > - 📡 **WebSocket** → one connection, both sides push freely, connection stays open.
 > - 🏛️ **All messages route through the server** → unlike WebRTC, there is no P2P. The server is always in the middle, which makes group logic easy to manage.
 
----
 
 ## Core Concepts at a Glance
 
@@ -33,7 +29,6 @@
 | `broadcast` | Send to everyone except the sender | Used for "user joined" notifications |
 | `namespace` | A partitioned section of the server | Isolate different apps on one server |
 
----
 
 ## Architecture Overview
 
@@ -46,34 +41,31 @@
 │           CLIENT SIDE            │              SERVER SIDE                  │
 ├──────────────────────────────────┼───────────────────────────────────────────┤
 │                                  │                                           │
-│  Browser A ──────────────────────┼──► socket.id: "abc123"  ─┐               │
-│  (User: Alice)                   │                           │               │
-│                                  │                           ▼               │
-│  Browser B ──────────────────────┼──► socket.id: "def456"  ─┤─► Room: ""    │
-│  (User: Bob)                     │                           │   (default)   │
-│                                  │                           │               │
-│  Browser C ──────────────────────┼──► socket.id: "ghi789"  ─┤               │
-│  (User: Carol)                   │                           │               │
-│                                  │                     ┌─────┘               │
+│  Browser A ──────────────────────┼──> socket.id: "abc123"  ─┐                │
+│  (User: Alice)                   │                          │                │
+│                                  │                          |                │
+│  Browser B ──────────────────────┼──> socket.id: "def456"  ─┤─> Room: ""     │
+│  (User: Bob)                     │                          │   (default)    │
+│                                  │                          │                │
+│  Browser C ──────────────────────┼──> socket.id: "ghi789"  ─┤                │
+│  (User: Carol)                   │                          │                │
+│                                  │                     ┌────┘                │
 │                                  │                     │                     │
 │                                  │              Room: "group-xyz"            │
 │                                  │              (Alice + Carol are members)  │
 │                                  │                                           │
-│  Each browser runs               │  Server holds:                           │
-│  socket.io client lib            │  - Map of socket.id → username           │
-│  and maintains one               │  - Map of roomId → { name, members[] }   │
+│  Each browser runs               │  Server holds:                            │
+│  socket.io client lib            │  - Map of socket.id → username            │
+│  and maintains one               │  - Map of roomId → { name, members[] }    │
 │  persistent WebSocket            │  - Logic to route messages correctly      │
 │  connection to the server        │                                           │
 └──────────────────────────────────┴───────────────────────────────────────────┘
 ```
 
----
-
 ## WebSocket / Socket.IO API Reference
 
 The API is split into five groups. The client-side and server-side APIs mirror each other intentionally — both use `emit` and `on` with the same event names.
 
----
 
 ### Group 1 — Connection API
 
@@ -155,8 +147,6 @@ io.on('connection', (socket) => {
 });
 ```
 
----
-
 ### Group 2 — Messaging API
 
 > **Mental model:** `emit` is "send a letter". `on` is "open your mailbox". The event name is the label on the envelope — both sides must use the same label for the message to be received. You can put anything you want inside the envelope (the payload).
@@ -234,8 +224,6 @@ socket.on('chat:message', (msg, ack) => {
 });
 ```
 
----
-
 ### Group 3 — Rooms API
 
 > **Mental model:** Rooms are like WhatsApp groups — the server manages a list of who's in each group. When you send to a room, the server delivers to everyone on that list. Joining and leaving a room is instant and costs nothing — it's just an entry in a Map on the server.
@@ -279,8 +267,6 @@ socket.on('chat:message', (msg) => {
 });
 ```
 
----
-
 ### Group 4 — Server Broadcast Targets
 
 > **Mental model:** This is a targeting system. When you fire a message, you need to tell Socket.IO who should receive it. Think of it like a megaphone with different range settings — whisper to one person, speak to a room, or shout to everyone.
@@ -313,8 +299,6 @@ socket.on('chat:message', (msg) => {
   //    with the server's timestamp — ensures consistency across all clients
 });
 ```
-
----
 
 ### Group 5 — File Transfer API
 
@@ -380,20 +364,21 @@ CHUNKED FILE TRANSFER — How it works
 
   Sender                              Server                     Receiver
     │                                    │                           │
-    │─── file:chunk-start ──────────────►│──── file:chunk-start ────►│
+    │─── file:chunk-start ──────────────>│──── file:chunk-start ────>│
     │    { name, type, size, totalChunks,│    (forwarded to target)  │
     │      transferId }                  │                           │
     │                                    │                           │
-    │─── file:chunk ────────────────────►│──── file:chunk ──────────►│
+    │─── file:chunk ────────────────────>│──── file:chunk ──────────>│
     │    { transferId, index: 0, data }  │                           │
-    │─── file:chunk ────────────────────►│──── file:chunk ──────────►│
+    │─── file:chunk ────────────────────>│──── file:chunk ──────────>│
     │    { transferId, index: 1, data }  │                           │
     │         ... (N chunks total)       │                           │
-    │─── file:chunk-end ────────────────►│──── file:chunk-end ──────►│
+    │─── file:chunk-end ────────────────>│──── file:chunk-end ──────>│
     │    { transferId }                  │    Receiver reassembles   │
     │                                    │    chunks in order        │
-    │◄── file:chunk-ack ─────────────────┤◄── file:chunk-ack ────────│
+    │<── file:chunk-ack ─────────────────┤<── file:chunk-ack ────────│
     │    { transferId, receivedChunks }  │    (confirms completion)  │
+    |                                    |                           |
 ```
 
 ```js
@@ -495,7 +480,6 @@ socket.on('file:chunk-end', ({ transferId }) => {
 });
 ```
 
----
 
 ## Full Connection & Message Flow
 
@@ -509,58 +493,56 @@ socket.on('file:chunk-end', ({ transferId }) => {
 ├──────────────────────┼───────────────────────┼───────────────────────────────┤
 │                      │                       │                               │
 │  io('localhost:3000')│                       │                               │
-│  ──────────────────► WebSocket handshake     │                               │
-│  ◄────────────────── socket.id = 'abc'       │                               │
+│  ──────────────────> WebSocket handshake     │                               │
+│  <────────────────── socket.id = 'abc'       │                               │
 │                      │                       │                               │
 │  emit('user:register'│                       │                               │
 │  { username: 'Alice'}│                       │                               │
-│  ──────────────────► users.set('abc','Alice')│                               │
+│  ──────────────────> users.set('abc','Alice')│                               │
 │                      │                       │                               │
 │  ─────── 1-ON-1 CHAT PATH ─────────────────────────────────────────────────  │
 │                      │                       │                               │
 │  emit('chat:message' │                       │                               │
 │  { to:'def', text }) │                       │                               │
-│  ──────────────────► socket.to('def')        │                               │
-│                      │ .emit('chat:message') ►│  socket.on('chat:message')   │
+│  ──────────────────> socket.to('def')        │                               │
+│                      │ .emit('chat:message')>│  socket.on('chat:message')    │
 │                      │                       │  renderMessage()              │
 │                      │                       │                               │
-│  ─────── GROUP CHAT PATH ───────────────────────────────────────────────────  │
+│  ─────── GROUP CHAT PATH ─────────────────────────────────────────────────── │
 │                      │                       │                               │
 │  emit('room:join'    │                       │                               │
 │  { roomId:'xyz' })   │                       │                               │
-│  ──────────────────► socket.join('xyz')      │                               │
+│  ──────────────────> socket.join('xyz')      │                               │
 │                      │ .to('xyz').emit(      │                               │
-│                      │  'room:user-joined') ─►│  (members notified)         │
+│                      │  'room:user-joined')->│  (members notified)           │
 │                      │                       │                               │
 │  emit('chat:message' │                       │                               │
 │  { roomId:'xyz',text}│                       │                               │
-│  ──────────────────► io.to('xyz').emit(      │                               │
+│  ──────────────────> io.to('xyz').emit(      │                               │
 │                      │  'chat:message')      │                               │
-│                      │  ─────────────────────►  (all room members receive)  │
-│                      │  ◄────────────────────  (sender also receives it)    │
+│                      │  ─────────────────────>  (all room members receive)   │
+│                      │  <────────────────────  (sender also receives it)     │
 │                      │                       │                               │
-│  ─────── FILE TRANSFER PATH ────────────────────────────────────────────────  │
+│  ─────── FILE TRANSFER PATH ──────────────────────────────────────────────── │
 │                      │                       │                               │
 │  emit('file:chunk-   │                       │                               │
 │   start', metadata)  │                       │                               │
-│  ──────────────────► forward to target(s) ──►│  prepare transfer slot       │
+│  ──────────────────> forward to target(s) ──>│  prepare transfer slot        │
 │  emit('file:chunk')  │                       │                               │
-│  × N times ─────────► forward each chunk ───►│  store chunk by index        │
+│  × N times ─────────> forward each chunk ───>│  store chunk by index         │
 │  emit('file:chunk-   │                       │                               │
 │   end')              │                       │                               │
-│  ──────────────────► forward ────────────────►│  reassemble → download link │
+│  ──────────────────> forward ───────────────>│  reassemble → download link   │
 │                      │                       │                               │
-│  ─────── DISCONNECT ────────────────────────────────────────────────────────  │
+│  ─────── DISCONNECT ──────────────────────────────────────────────────────── │
 │                      │                       │                               │
 │  (tab closed /       │                       │                               │
 │   network drop)      │                       │                               │
-│  ──────────────────► socket.on('disconnect') │                               │
+│  ──────────────────> socket.on('disconnect') │                               │
 │                      │ remove from users map │                               │
-│                      │ notify rooms ─────────►│  'room:user-left' event     │
+│                      │ notify rooms ────────>│  'room:user-left' event       │
 └──────────────────────┴───────────────────────┴───────────────────────────────┘
 ```
-
----
 
 ## Step-by-Step Implementation
 
@@ -581,8 +563,6 @@ npm install express socket.io
 node server.js
 ```
 **Test:** Open `http://localhost:3000` in multiple browser tabs to simulate multiple users.
-
----
 
 ### server.js — Complete Annotated Server
 
@@ -894,8 +874,6 @@ io.on('connection', (socket) => {
 
 server.listen(3000, () => console.log('Server running → http://localhost:3000'));
 ```
-
----
 
 ### client.html — Complete Annotated Client
 
@@ -1438,7 +1416,6 @@ function formatBytes(bytes) {
 }
 ```
 
----
 
 ### Step 8 — The Full Execution Order (Putting It All Together)
 
@@ -1596,7 +1573,6 @@ sendCurrentMessage();
 // ═══════════════════════════════════════════════════════════════════════════════
 ```
 
----
 
 ## Quick Reference — Cheat Sheets
 
@@ -1639,8 +1615,6 @@ sendCurrentMessage();
 | `socket.on('chat:group', ...)` | Handle incoming group messages |
 | `socket.on('file:receive / chunk-*', ...)` | Handle file deliveries |
 
----
-
 ## Common Errors & Fixes
 
 | Error | Cause | Fix |
@@ -1652,8 +1626,6 @@ sendCurrentMessage();
 | Room messages received twice | Used `io.to()` and also echoed manually | Use only `io.to()` for group — it already includes the sender |
 | XSS via chat messages | Rendering `msg.text` as raw HTML | Always escape user content with `escapeHtml()` before inserting |
 | Memory leak on large transfers | `incomingTransfers` map never cleaned up | Always call `incomingTransfers.delete(transferId)` after assembly |
-
----
 
 ## Testing Locally
 
